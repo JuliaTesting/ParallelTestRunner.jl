@@ -40,19 +40,36 @@ using ParallelTestRunner
 runtests(MyModule, ARGS)
 ```
 
-### Filtering
+### Customizing the test suite
 
-`runtests` takes a keyword argument that acts as a filter function
+By default, `runtests` automatically discovers all `.jl` files in your `test/` directory (excluding `runtests.jl` itself) using the `find_tests` function. You can customize which tests to run by providing a custom `testsuite` dictionary:
 
 ```julia
-function test_filter(test)
-    if Sys.iswindows() && test == "ext/specialfunctions"
-        return false
+# Manually define your test suite
+testsuite = Dict(
+    "basic" => quote
+        include("basic.jl")
+    end,
+    "advanced" => quote
+        include("advanced.jl")
     end
-    return true
+)
+
+runtests(MyModule, ARGS; testsuite)
+```
+
+You can also use `find_tests` to automatically discover tests and then filter or modify them:
+
+```julia
+# Start with autodiscovered tests
+testsuite = find_tests(pwd())
+
+# Remove tests that shouldn't run on Windows
+if Sys.iswindows()
+    delete!(testsuite, "ext/specialfunctions")
 end
 
-runtests(MyModule, ARGS; test_filter)
+runtests(MyModule, ARGS; testsuite)
 ```
 
 ### Provide defaults

@@ -1,6 +1,6 @@
 module ParallelTestRunner
 
-export runtests, addworkers, addworker
+export runtests, addworkers, addworker, find_tests
 
 using Malt
 using Dates
@@ -445,9 +445,51 @@ function addworker(; env=Vector{Pair{String, String}}())
 end
 
 """
-    runtests(mod::Module, ARGS; RecordType = TestRecord,
-                                test_filter = Returns(true),
-                                custom_tests = Dict(),
+    find_tests(dir::String) -> Dict{String, Expr}
+
+Discover test files in a directory and return a test suite dictionary.
+
+Walks through `dir` and finds all `.jl` files (excluding `runtests.jl`), returning a
+dictionary mapping test names to expression that include each test file.
+"""
+function find_tests(dir::String)
+    tests = Dict{String, Expr}()
+    for (rootpath, dirs, files) in walkdir(dir)
+        # find Julia files
+        filter!(files) do file
+            endswith(file, ".jl") && file !== "runtests.jl"
+        end
+        isempty(files) && continue
+
+        # strip extension
+        files = map(files) do file
+            file[1:(end - 3)]
+        end
+
+        # prepend subdir
+        subdir = relpath(rootpath, dir)
+        if subdir != "."
+            files = map(files) do file
+                joinpath(subdir, file)
+            end
+        end
+
+        # unify path separators
+        files = map(files) do file
+            replace(file, path_separator => '/')
+        end
+
+        for file in files
+            path = joinpath(rootpath, file * ".jl")
+            tests[file] = :(include($path))
+        end
+    end
+    return tests
+end
+
+"""
+    runtests(mod::Module, ARGS; testsuite::Dict{String,Expr}=find_tests(pwd()),
+                                RecordType = TestRecord,
                                 init_code = :(),
                                 test_worker = Returns(nothing),
                                 stdout = Base.stdout,
@@ -463,9 +505,9 @@ Run Julia tests in parallel across multiple worker processes.
 
 Several keyword arguments are also supported:
 
+- `testsuite`: Dictionary mapping test names to expressions to execute (default: `find_tests(pwd())`).
+  By default, automatically discovers all `.jl` files in the test directory.
 - `RecordType`: Type of test record to use for tracking test results (default: `TestRecord`)
-- `test_filter`: Optional function to filter which tests to run (default: run all tests)
-- `custom_tests`: Optional dictionary of custom tests, mapping test names to expressions.
 - `init_code`: Code use to initialize each test's sandbox module (e.g., import auxiliary
   packages, define constants, etc).
 - `test_worker`: Optional function that takes a test name and returns a specific worker.
@@ -494,14 +536,24 @@ Several keyword arguments are also supported:
 ## Examples
 
 ```julia
-# Run all tests with default settings
+# Run all tests with default settings (auto-discovers .jl files)
 runtests(MyModule, ARGS)
 
 # Run only tests matching "integration"
 runtests(MyModule, ["integration"])
 
-# Run with custom filter function
-runtests(MyModule, ARGS; test_filter = test -> occursin("unit", test))
+# Customize the test suite
+testsuite = find_tests(pwd())
+delete!(testsuite, "slow_test")  # Remove a specific test
+runtests(MyModule, ARGS; testsuite)
+
+# Define a custom test suite manually
+testsuite = Dict(
+    "custom" => quote
+        @test 1 + 1 == 2
+    end
+)
+runtests(MyModule, ARGS; testsuite)
 
 # Use custom test record type
 runtests(MyModule, ARGS; RecordType = MyCustomTestRecord)
@@ -512,9 +564,9 @@ runtests(MyModule, ARGS; RecordType = MyCustomTestRecord)
 Workers are automatically recycled when they exceed memory limits to prevent out-of-memory
 issues during long test runs. The memory limit is set based on system architecture.
 """
-function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = TestRecord,
-                  custom_tests::Dict{String, Expr}=Dict{String, Expr}(), init_code = :(),
-                  test_worker = Returns(nothing), stdout = Base.stdout, stderr = Base.stderr)
+function runtests(mod::Module, ARGS; testsuite::Dict{String,Expr} = find_tests(pwd()),
+                  RecordType = TestRecord, init_code = :(), test_worker = Returns(nothing),
+                  stdout = Base.stdout, stderr = Base.stderr)
     #
     # set-up
     #
@@ -545,51 +597,8 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
         error("Unknown test options `$(join(optlike_args, " "))` (try `--help` for usage instructions)")
     end
 
-    WORKDIR = pwd()
-
-    # choose tests
-    tests = []
-    test_runners = Dict()
-    ## custom tests by the user
-    for (name, runner) in custom_tests
-        push!(tests, name)
-        test_runners[name] = runner
-    end
-    ## files in the test folder
-    for (rootpath, dirs, files) in walkdir(WORKDIR)
-        # find Julia files
-        filter!(files) do file
-            endswith(file, ".jl") && file !== "runtests.jl"
-        end
-        isempty(files) && continue
-
-        # strip extension
-        files = map(files) do file
-            file[1:(end - 3)]
-        end
-
-        # prepend subdir
-        subdir = relpath(rootpath, WORKDIR)
-        if subdir != "."
-            files = map(files) do file
-                joinpath(subdir, file)
-            end
-        end
-
-        # unify path separators
-        files = map(files) do file
-            replace(file, path_separator => '/')
-        end
-
-        append!(tests, files)
-        for file in files
-            test_runners[file] = quote
-                include($(joinpath(WORKDIR, file * ".jl")))
-            end
-        end
-    end
-    ## finalize
-    unique!(tests)
+    # determine test order
+    tests = collect(keys(testsuite))
     Random.shuffle!(tests)
     historical_durations = load_test_history(mod)
     sort!(tests, by = x -> -get(historical_durations, x, Inf))
@@ -603,11 +612,8 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
         exit(0)
     end
 
-    # filter tests
-    if isempty(ARGS)
-        filter!(test_filter, tests)
-    else
-        # let the user filter
+    # filter tests based on command-line arguments
+    if !isempty(ARGS)
         filter!(tests) do test
             any(arg -> startswith(test, arg), ARGS)
         end
@@ -834,8 +840,8 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
                 put!(printer_channel, (:started, test, worker_id(wrkr)))
                 result = try
                     Malt.remote_eval_wait(Main, wrkr, :(import ParallelTestRunner))
-                    Malt.remote_call_fetch(invokelatest, wrkr, runtest, RecordType, test_runners[test], test,
-                                              init_code, io_ctx.color)
+                    Malt.remote_call_fetch(invokelatest, wrkr, runtest, RecordType,
+                                           testsuite[test], test, init_code, io_ctx.color)
                 catch ex
                     if isa(ex, InterruptException)
                         # the worker got interrupted, signal other tasks to stop

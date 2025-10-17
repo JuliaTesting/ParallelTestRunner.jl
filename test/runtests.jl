@@ -5,7 +5,7 @@ cd(@__DIR__)
 
 @testset "ParallelTestRunner" verbose=true begin
 
-@testset "basic test" begin
+@testset "basic use" begin
     io = IOBuffer()
     io_color = IOContext(io, :color => true)
     runtests(ParallelTestRunner, ["--verbose"]; stdout=io_color, stderr=io_color)
@@ -24,7 +24,23 @@ cd(@__DIR__)
     @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
 end
 
-@testset "custom tests and init code" begin
+@testset "custom tests" begin
+    testsuite = Dict(
+        "custom" => quote
+            @test true
+        end
+    )
+
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--verbose"]; testsuite, stdout=io, stderr=io)
+
+    str = String(take!(io))
+    @test !contains(str, r"basic .+ started at")
+    @test contains(str, r"custom .+ started at")
+    @test contains(str, "SUCCESS")
+end
+
+@testset "init code" begin
     init_code = quote
         using Test
         should_be_defined() = true
@@ -33,7 +49,7 @@ end
             return :(true)
         end
     end
-    custom_tests = Dict(
+    testsuite = Dict(
         "custom" => quote
             @test should_be_defined()
             @test @should_also_be_defined()
@@ -41,10 +57,9 @@ end
     )
 
     io = IOBuffer()
-    runtests(ParallelTestRunner, ["--verbose"]; init_code, custom_tests, stdout=io, stderr=io)
+    runtests(ParallelTestRunner, ["--verbose"]; init_code, testsuite, stdout=io, stderr=io)
 
     str = String(take!(io))
-    @test contains(str, r"basic .+ started at")
     @test contains(str, r"custom .+ started at")
     @test contains(str, "SUCCESS")
 end
@@ -56,7 +71,7 @@ end
         end
         return nothing
     end
-    custom_tests = Dict(
+    testsuite = Dict(
         "needs env var" => quote
             @test ENV["SPECIAL_ENV_VAR"] == "42"
         end,
@@ -66,17 +81,16 @@ end
     )
 
     io = IOBuffer()
-    runtests(ParallelTestRunner, ["--verbose"]; test_worker, custom_tests, stdout=io, stderr=io)
+    runtests(ParallelTestRunner, ["--verbose"]; test_worker, testsuite, stdout=io, stderr=io)
 
     str = String(take!(io))
-    @test contains(str, r"basic .+ started at")
     @test contains(str, r"needs env var .+ started at")
     @test contains(str, r"doesn't need env var .+ started at")
     @test contains(str, "SUCCESS")
 end
 
 @testset "failing test" begin
-    custom_tests = Dict(
+    testsuite = Dict(
         "failing test" => quote
             @test 1 == 2
         end
@@ -85,11 +99,10 @@ end
 
     io = IOBuffer()
     @test_throws Test.FallbackTestSetException("Test run finished with errors") begin
-        runtests(ParallelTestRunner, ["--verbose"]; custom_tests, stdout=io, stderr=io)
+        runtests(ParallelTestRunner, ["--verbose"]; testsuite, stdout=io, stderr=io)
     end
 
     str = String(take!(io))
-    @test contains(str, r"basic .+ started at")
     @test contains(str, r"failing test .+ failed at")
     @test contains(str, "$(basename(@__FILE__)):$error_line")
     @test contains(str, "FAILURE")
@@ -98,7 +111,7 @@ end
 end
 
 @testset "nested failure" begin
-    custom_tests = Dict(
+    testsuite = Dict(
         "nested" => quote
             @test true
             @testset "foo" begin
@@ -113,7 +126,7 @@ end
 
     io = IOBuffer()
     @test_throws Test.FallbackTestSetException("Test run finished with errors") begin
-        runtests(ParallelTestRunner, ["--verbose"]; custom_tests, stdout=io, stderr=io)
+        runtests(ParallelTestRunner, ["--verbose"]; testsuite, stdout=io, stderr=io)
     end
 
     str = String(take!(io))
@@ -128,7 +141,7 @@ end
 end
 
 @testset "throwing test" begin
-    custom_tests = Dict(
+    testsuite = Dict(
         "throwing test" => quote
             error("This test throws an error")
         end
@@ -137,11 +150,10 @@ end
 
     io = IOBuffer()
     @test_throws Test.FallbackTestSetException("Test run finished with errors") begin
-        runtests(ParallelTestRunner, ["--verbose"]; custom_tests, stdout=io, stderr=io)
+        runtests(ParallelTestRunner, ["--verbose"]; testsuite, stdout=io, stderr=io)
     end
 
     str = String(take!(io))
-    @test contains(str, r"basic .+ started at")
     @test contains(str, r"throwing test .+ failed at")
     @test contains(str, "$(basename(@__FILE__)):$error_line")
     @test contains(str, "FAILURE")
@@ -150,7 +162,7 @@ end
 end
 
 @testset "crashing test" begin
-    custom_tests = Dict(
+    testsuite = Dict(
         "abort" => quote
             abort() = ccall(:abort, Nothing, ())
             abort()
@@ -159,7 +171,7 @@ end
 
     io = IOBuffer()
     @test_throws Test.FallbackTestSetException("Test run finished with errors") begin
-        runtests(ParallelTestRunner, ["--verbose"]; custom_tests, stdout=io, stderr=io)
+        runtests(ParallelTestRunner, ["--verbose"]; testsuite, stdout=io, stderr=io)
     end
 
     str = String(take!(io))
@@ -171,14 +183,14 @@ end
 end
 
 @testset "test output" begin
-    custom_tests = Dict(
+    testsuite = Dict(
         "output" => quote
             println("This is some output from the test")
         end
     )
 
     io = IOBuffer()
-    runtests(ParallelTestRunner, ["--verbose"]; custom_tests, stdout=io, stderr=io)
+    runtests(ParallelTestRunner, ["--verbose"]; testsuite, stdout=io, stderr=io)
 
     str = String(take!(io))
     @test contains(str, r"output .+ started at")
@@ -187,14 +199,14 @@ end
 end
 
 @testset "warnings" begin
-    custom_tests = Dict(
+    testsuite = Dict(
         "warning" => quote
             @test_warn "3.0" @warn "3.0"
         end
     )
 
     io = IOBuffer()
-    runtests(ParallelTestRunner, ["--verbose"]; custom_tests, stdout=io, stderr=io)
+    runtests(ParallelTestRunner, ["--verbose"]; testsuite, stdout=io, stderr=io)
 
     str = String(take!(io))
     @test contains(str, r"warning .+ started at")
