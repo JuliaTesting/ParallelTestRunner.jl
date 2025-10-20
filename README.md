@@ -58,18 +58,23 @@ testsuite = Dict(
 runtests(MyModule, ARGS; testsuite)
 ```
 
-You can also use `find_tests` to automatically discover tests and then filter or modify them:
+You can also use `find_tests` to automatically discover tests and then filter or modify them. This requires manually parsing arguments so that filtering is only applied when the user did not request specific tests to run:
 
 ```julia
 # Start with autodiscovered tests
 testsuite = find_tests(pwd())
 
-# Remove tests that shouldn't run on Windows
-if Sys.iswindows()
-    delete!(testsuite, "ext/specialfunctions")
+# Parse arguments
+args = parse_args(ARGS)
+
+if filter_tests!(testsuite, args)
+    # Remove tests that shouldn't run on Windows
+    if Sys.iswindows()
+        delete!(testsuite, "ext/specialfunctions")
+    end
 end
 
-runtests(MyModule, ARGS; testsuite)
+runtests(MyModule, args; testsuite)
 ```
 
 ### Provide defaults
