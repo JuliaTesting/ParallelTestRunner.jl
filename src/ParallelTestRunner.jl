@@ -92,7 +92,7 @@ struct TestIOContext
     rss_align::Int
 end
 
-function test_IOContext(::Type{TestRecord}, stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int)
+function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int)
     elapsed_align = textwidth("Time (s)")
     gc_align = textwidth("GC (s)")
     percent_align = textwidth("GC %")
@@ -107,7 +107,7 @@ function test_IOContext(::Type{TestRecord}, stdout::IO, stderr::IO, lock::Reentr
     )
 end
 
-function print_header(::Type{TestRecord}, ctx::TestIOContext, testgroupheader, workerheader)
+function print_header(ctx::TestIOContext, testgroupheader, workerheader)
     lock(ctx.lock)
     try
         printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ")
@@ -121,7 +121,7 @@ function print_header(::Type{TestRecord}, ctx::TestIOContext, testgroupheader, w
     end
 end
 
-function print_test_started(::Type{TestRecord}, wrkr, test, ctx::TestIOContext)
+function print_test_started(wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stdout, test, lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │", color = :white)
@@ -185,7 +185,7 @@ function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
     end
 end
 
-function print_test_crashed(::Type{TestRecord}, wrkr, test, ctx::TestIOContext)
+function print_test_crashed(wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stderr, test, color = :red)
@@ -236,7 +236,7 @@ function Test.finish(ts::WorkerTestSet)
     return ts.wrapped_ts
 end
 
-function runtest(::Type{TestRecord}, f, name, init_code, color)
+function runtest(f, name, init_code, color)
     function inner()
         # generate a temporary module to execute the tests in
         mod = @eval(Main, module $(gensym(name)) end)
@@ -583,7 +583,6 @@ end
 """
     runtests(mod::Module, args::ParsedArgs;
              testsuite::Dict{String,Expr}=find_tests(pwd()),
-             RecordType = TestRecord,
              init_code = :(),
              test_worker = Returns(nothing),
              stdout = Base.stdout,
@@ -603,7 +602,6 @@ Several keyword arguments are also supported:
 
 - `testsuite`: Dictionary mapping test names to expressions to execute (default: `find_tests(pwd())`).
   By default, automatically discovers all `.jl` files in the test directory.
-- `RecordType`: Type of test record to use for tracking test results (default: `TestRecord`)
 - `init_code`: Code use to initialize each test's sandbox module (e.g., import auxiliary
   packages, define constants, etc).
 - `test_worker`: Optional function that takes a test name and returns a specific worker.
@@ -663,7 +661,7 @@ issues during long test runs. The memory limit is set based on system architectu
 """
 function runtests(mod::Module, args::ParsedArgs;
                   testsuite::Dict{String,Expr} = find_tests(pwd()),
-                  RecordType = TestRecord, init_code = :(), test_worker = Returns(nothing),
+                  init_code = :(), test_worker = Returns(nothing),
                   stdout = Base.stdout, stderr = Base.stderr)
     #
     # set-up
@@ -731,8 +729,8 @@ function runtests(mod::Module, args::ParsedArgs;
         stderr.lock = print_lock
     end
 
-    io_ctx = test_IOContext(RecordType, stdout, stderr, print_lock, name_align)
-    print_header(RecordType, io_ctx, testgroupheader, workerheader)
+    io_ctx = test_IOContext(stdout, stderr, print_lock, name_align)
+    print_header(io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
 
@@ -829,7 +827,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         # Optionally print verbose started message
                         if args.verbose !== nothing
                             clear_status()
-                            print_test_started(RecordType, wrkr, test_name, io_ctx)
+                            print_test_started(wrkr, test_name, io_ctx)
                         end
 
                     elseif msg_type == :finished
@@ -846,7 +844,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         test_name, wrkr = msg[2], msg[3]
 
                         clear_status()
-                        print_test_crashed(RecordType, wrkr, test_name, io_ctx)
+                        print_test_crashed(wrkr, test_name, io_ctx)
                     end
                 end
 
@@ -906,7 +904,7 @@ function runtests(mod::Module, args::ParsedArgs;
                 put!(printer_channel, (:started, test, worker_id(wrkr)))
                 result = try
                     Malt.remote_eval_wait(Main, wrkr, :(import ParallelTestRunner))
-                    Malt.remote_call_fetch(invokelatest, wrkr, runtest, RecordType,
+                    Malt.remote_call_fetch(invokelatest, wrkr, runtest,
                                            testsuite[test], test, init_code, io_ctx.color)
                 catch ex
                     if isa(ex, InterruptException)
@@ -922,7 +920,6 @@ function runtests(mod::Module, args::ParsedArgs;
 
                 # act on the results
                 if result isa AbstractTestRecord
-                    @assert result isa RecordType
                     put!(printer_channel, (:finished, test, worker_id(wrkr), result))
 
                     if memory_usage(result) > max_worker_rss
