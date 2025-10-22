@@ -689,12 +689,12 @@ function runtests(mod::Module, args::ParsedArgs;
     jobs = something(args.jobs, default_njobs())
     jobs = clamp(jobs, 1, length(tests))
     println(stdout, "Running $jobs tests in parallel. If this is too many, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
-    workers = addworkers(min(jobs, length(tests)))
-    nworkers = length(workers)
+    nworkers = min(jobs, length(tests))
+    workers = fill(nothing, nworkers)
 
     t0 = time()
     results = []
-    running_tests = Dict{String, Tuple{Int, Float64}}()  # test => (worker, start_time)
+    running_tests = Dict{String, Float64}()  # test => start_time
     test_lock = ReentrantLock() # to protect crucial access to tests and running_tests
 
     done = false
@@ -755,9 +755,9 @@ function runtests(mod::Module, args::ParsedArgs;
         line1 = ""
 
         # line 2: running tests
-        test_list = sort(collect(running_tests), by = x -> x[2][2])
-        status_parts = map(test_list) do (test, (wrkr, _))
-            "$test ($wrkr)"
+        test_list = sort(collect(keys(running_tests)), by = x -> running_tests[x])
+        status_parts = map(test_list) do test
+            "$test"
         end
         line2 = "Running:  " * join(status_parts, ", ")
         ## truncate
@@ -777,7 +777,7 @@ function runtests(mod::Module, args::ParsedArgs;
 
             est_remaining = 0.0
             ## currently-running
-            for (test, (_, start_time)) in running_tests
+            for (test, start_time) in running_tests
                 elapsed = time() - start_time
                 duration = get(historical_durations, test, est_per_test)
                 est_remaining += max(0.0, duration - elapsed)
@@ -883,21 +883,24 @@ function runtests(mod::Module, args::ParsedArgs;
     for p in workers
         push!(worker_tasks, @async begin
             while !done
-                # if a worker failed, spawn a new one
-                if !Malt.isrunning(p)
-                    p = addworker()
-                end
-
                 # get a test to run
-                test, wrkr, test_t0 = Base.@lock test_lock begin
+                test, test_t0 = Base.@lock test_lock begin
                     isempty(tests) && break
                     test = popfirst!(tests)
-                    wrkr = something(test_worker(test), p)
 
                     test_t0 = time()
-                    running_tests[test] = (worker_id(wrkr), test_t0)
+                    running_tests[test] = test_t0
 
-                    test, wrkr, test_t0
+                    test, test_t0
+                end
+
+                # if a worker failed, spawn a new one
+                wrkr = test_worker(test)
+                if wrkr ===  nothing
+                    wrkr = p
+                end
+                if wrkr === nothing || !Malt.isrunning(wrkr)
+                    wrkr = p = addworker()
                 end
 
                 # run the test
