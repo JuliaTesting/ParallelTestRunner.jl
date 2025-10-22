@@ -929,6 +929,10 @@ function runtests(mod::Module, args::ParsedArgs;
                 # act on the results
                 if result isa AbstractTestRecord
                     put!(printer_channel, (:finished, test, worker_id(wrkr), result))
+                    if anynonpass(result[]) && args.quickfail !== nothing
+                        stop_work()
+                        break
+                    end
 
                     if memory_usage(result) > max_worker_rss
                         # the worker has reached the max-rss limit, recycle it
@@ -941,6 +945,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     put!(printer_channel, (:crashed, test, worker_id(wrkr)))
                     if args.quickfail !== nothing
                         stop_work()
+                        break
                     end
 
                     # the worker encountered some serious failure, recycle it
