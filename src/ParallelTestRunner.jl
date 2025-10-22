@@ -414,15 +414,36 @@ worker_id(wrkr) = WORKER_IDS[wrkr.proc_pid]
 Add `X` worker processes.
 """
 addworkers(X; kwargs...) = [addworker(; kwargs...) for _ in 1:X]
-function addworker(; env=Vector{Pair{String, String}}())
+
+"""
+    addworker(; env=Vector{Pair{String, String}}())
+
+Add a single worker process. 
+
+## Arguments
+- `env`: Vector of environment variable pairs to set for the worker process.
+- `exename`: Custom executable to use for the worker process.
+- `exeflags`: Custom flags to pass to the worker process.
+"""
+function addworker(;
+        env = Vector{Pair{String, String}}(),
+        exename = nothing, exeflags = nothing
+    )
     exe = test_exe()
-    exeflags = exe[2:end]
+    if exename === nothing
+        exename = exe[1]
+    end
+    if exeflags !== nothing
+        exeflags = vcat(exe[2:end], exeflags)
+    else
+        exeflags = exe[2:end]
+    end
 
     push!(env, "JULIA_NUM_THREADS" => "1")
     # Malt already sets OPENBLAS_NUM_THREADS to 1
     push!(env, "OPENBLAS_NUM_THREADS" => "1")
 
-    wrkr = Malt.Worker(;exeflags, env)
+    wrkr = Malt.Worker(; exename, exeflags, env)
     WORKER_IDS[wrkr.proc_pid] = length(WORKER_IDS) + 1
     return wrkr
 end

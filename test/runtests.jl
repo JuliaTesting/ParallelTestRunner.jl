@@ -68,6 +68,8 @@ end
     function test_worker(name)
         if name == "needs env var"
             return addworker(env = ["SPECIAL_ENV_VAR" => "42"])
+        elseif name == "threads/2"
+            return addworker(exeflags = ["--threads=2"])
         end
         return nothing
     end
@@ -77,6 +79,12 @@ end
         end,
         "doesn't need env var" => quote
             @test !haskey(ENV, "SPECIAL_ENV_VAR")
+        end,
+        "threads/1" => quote
+            @test Base.Threads.nthreads() == 1
+        end,
+        "threads/2" => quote
+            @test Base.Threads.nthreads() == 2
         end
     )
 
@@ -86,6 +94,8 @@ end
     str = String(take!(io))
     @test contains(str, r"needs env var .+ started at")
     @test contains(str, r"doesn't need env var .+ started at")
+    @test contains(str, r"threads/1 .+ started at")
+    @test contains(str, r"threads/2 .+ started at")
     @test contains(str, "SUCCESS")
 end
 
