@@ -1,6 +1,6 @@
 module ParallelTestRunner
 
-export runtests, addworkers, addworker
+export runtests, addworkers, addworker, find_tests, parse_args, filter_tests!
 
 using Malt
 using Dates
@@ -34,28 +34,6 @@ else
 end
 
 const max_worker_rss = JULIA_TEST_MAXRSS_MB * 2^20
-
-# parse some command-line arguments
-function extract_flag!(args, flag, default = nothing; typ = typeof(default))
-    for f in args
-        if startswith(f, flag)
-            # Check if it's just `--flag` or if it's `--flag=foo`
-            if f != flag
-                val = split(f, '=')[2]
-                if !(typ === Nothing || typ <: AbstractString)
-                    val = parse(typ, val)
-                end
-            else
-                val = default
-            end
-
-            # Drop this value from our args
-            filter!(x -> x != f, args)
-            return (true, val)
-        end
-    end
-    return (false, default)
-end
 
 function with_testset(f, testset)
     @static if VERSION >= v"1.13.0-DEV.1044"
@@ -114,7 +92,7 @@ struct TestIOContext
     rss_align::Int
 end
 
-function test_IOContext(::Type{TestRecord}, stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int)
+function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int)
     elapsed_align = textwidth("Time (s)")
     gc_align = textwidth("GC (s)")
     percent_align = textwidth("GC %")
@@ -129,7 +107,7 @@ function test_IOContext(::Type{TestRecord}, stdout::IO, stderr::IO, lock::Reentr
     )
 end
 
-function print_header(::Type{TestRecord}, ctx::TestIOContext, testgroupheader, workerheader)
+function print_header(ctx::TestIOContext, testgroupheader, workerheader)
     lock(ctx.lock)
     try
         printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ")
@@ -143,7 +121,7 @@ function print_header(::Type{TestRecord}, ctx::TestIOContext, testgroupheader, w
     end
 end
 
-function print_test_started(::Type{TestRecord}, wrkr, test, ctx::TestIOContext)
+function print_test_started(wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stdout, test, lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │", color = :white)
@@ -207,7 +185,7 @@ function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
     end
 end
 
-function print_test_crashed(::Type{TestRecord}, wrkr, test, ctx::TestIOContext)
+function print_test_crashed(wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stderr, test, color = :red)
@@ -258,7 +236,7 @@ function Test.finish(ts::WorkerTestSet)
     return ts.wrapped_ts
 end
 
-function runtest(::Type{TestRecord}, f, name, init_code, color)
+function runtest(f, name, init_code, color)
     function inner()
         # generate a temporary module to execute the tests in
         mod = @eval(Main, module $(gensym(name)) end)
@@ -274,22 +252,27 @@ function runtest(::Type{TestRecord}, f, name, init_code, color)
             GC.gc(true)
             Random.seed!(1)
 
-            mktemp() do path, io
-                stats = redirect_stdio(stdout=io, stderr=io) do
-                    # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
-                    # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
-                    # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
-                    @timed @testset WorkerTestSet "placeholder" begin
-                        @testset DefaultTestSet $name begin
-                            $f
-                        end
+            pipe = Pipe()
+            pipe_initialized = Channel{Nothing}(1)
+            reader = @async begin
+                take!(pipe_initialized)
+                read(pipe, String)
+            end
+            stats = redirect_stdio(stdout=pipe, stderr=pipe) do
+                put!(pipe_initialized, nothing)
+
+                # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
+                # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
+                # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
+                @timed @testset WorkerTestSet "placeholder" begin
+                    @testset DefaultTestSet $name begin
+                        $f
                     end
                 end
-                close(io)
-                output = read(path, String)
-                (; testset=stats.value, output, stats.time, stats.bytes, stats.gctime)
-
             end
+            close(pipe.in)
+            output = fetch(reader)
+            (; testset=stats.value, output, stats.time, stats.bytes, stats.gctime)
         end
 
         # process results
@@ -445,13 +428,171 @@ function addworker(; env=Vector{Pair{String, String}}())
 end
 
 """
-    runtests(mod::Module, ARGS; RecordType = TestRecord,
-                                test_filter = Returns(true),
-                                custom_tests = Dict(),
-                                init_code = :(),
-                                test_worker = Returns(nothing),
-                                stdout = Base.stdout,
-                                stderr = Base.stderr)
+    find_tests(dir::String) -> Dict{String, Expr}
+
+Discover test files in a directory and return a test suite dictionary.
+
+Walks through `dir` and finds all `.jl` files (excluding `runtests.jl`), returning a
+dictionary mapping test names to expression that include each test file.
+"""
+function find_tests(dir::String)
+    tests = Dict{String, Expr}()
+    for (rootpath, dirs, files) in walkdir(dir)
+        # find Julia files
+        filter!(files) do file
+            endswith(file, ".jl") && file !== "runtests.jl"
+        end
+        isempty(files) && continue
+
+        # strip extension
+        files = map(files) do file
+            file[1:(end - 3)]
+        end
+
+        # prepend subdir
+        subdir = relpath(rootpath, dir)
+        if subdir != "."
+            files = map(files) do file
+                joinpath(subdir, file)
+            end
+        end
+
+        # unify path separators
+        files = map(files) do file
+            replace(file, path_separator => '/')
+        end
+
+        for file in files
+            path = joinpath(rootpath, file * ".jl")
+            tests[file] = :(include($path))
+        end
+    end
+    return tests
+end
+
+struct ParsedArgs
+    jobs::Union{Some{Int}, Nothing}
+    verbose::Union{Some{Nothing}, Nothing}
+    quickfail::Union{Some{Nothing}, Nothing}
+    list::Union{Some{Nothing}, Nothing}
+
+    custom::Dict{String,Any}
+
+    positionals::Vector{String}
+end
+
+# parse some command-line arguments
+function extract_flag!(args, flag; typ = Nothing)
+    for f in args
+        if startswith(f, flag)
+            # Check if it's just `--flag` or if it's `--flag=foo`
+            val = if f == flag
+                nothing
+            else
+                parts = split(f, '=')
+                if typ === Nothing || typ <: AbstractString
+                    parts[2]
+                else
+                    parse(typ, parts[2])
+                end
+            end
+
+            # Drop this value from our args
+            filter!(x -> x != f, args)
+            return Some(val)
+        end
+    end
+    return nothing
+end
+
+"""
+    parse_args(args; [custom::Array{String}]) -> ParsedArgs
+
+Parse command-line arguments for `runtests`. Typically invoked by passing `Base.ARGS`.
+
+Fields of this structure represent command-line options, containing `nothing` when the
+option was not specified, or `Some(optional_value=nothing)` when it was.
+
+Custom arguments can be specified via the `custom` keyword argument, which should be
+an array of strings representing custom flag names (without the `--` prefix). Presence
+of these flags will be recorded in the `custom` field of the returned `ParsedArgs` object.
+"""
+function parse_args(args; custom::Array{String} = String[])
+    args = copy(args)
+
+    help = extract_flag!(args, "--help")
+    if help !== nothing
+        usage =
+            """
+            Usage: runtests.jl [--help] [--list] [--jobs=N] [TESTS...]
+
+               --help             Show this text.
+               --list             List all available tests.
+               --verbose          Print more information during testing.
+               --quickfail        Fail the entire run as soon as a single test errored.
+               --jobs=N           Launch `N` processes to perform tests."""
+
+        if !isempty(custom)
+            usage *= "\n\nCustom arguments:"
+            for flag in custom
+                usage *= "\n   --$flag"
+            end
+        end
+        usage *= "\n\nRemaining arguments filter the tests that will be executed."
+        println(usage)
+        exit(0)
+    end
+
+    jobs = extract_flag!(args, "--jobs"; typ = Int)
+    verbose = extract_flag!(args, "--verbose")
+    quickfail = extract_flag!(args, "--quickfail")
+    list = extract_flag!(args, "--list")
+
+    custom_args = Dict{String,Any}()
+    for flag in custom
+        custom_args[flag] = extract_flag!(args, "--$flag")
+    end
+
+    ## no options should remain
+    optlike_args = filter(startswith("-"), args)
+    if !isempty(optlike_args)
+        error("Unknown test options `$(join(optlike_args, " "))` (try `--help` for usage instructions)")
+    end
+
+    return ParsedArgs(jobs, verbose, quickfail, list, custom_args, args)
+end
+
+"""
+    filter_tests!(testsuite, args::ParsedArgs) -> Bool
+
+Filter tests in `testsuite` based on command-line arguments in `args`.
+
+Returns `true` if additional filtering may be done by the caller, `false` otherwise.
+"""
+function filter_tests!(testsuite, args::ParsedArgs)
+    # the user did not request specific tests, so let the caller do its own filtering
+    isempty(args.positionals) && return true
+
+    # only select tests matching positional arguments
+    tests = collect(keys(testsuite))
+    for test in tests
+        if !any(arg -> startswith(test, arg), args.positionals)
+            delete!(testsuite, test)
+        end
+    end
+
+    # the user requested specific tests, so don't allow further filtering
+    return false
+end
+
+"""
+    runtests(mod::Module, args::ParsedArgs;
+             testsuite::Dict{String,Expr}=find_tests(pwd()),
+             init_code = :(),
+             test_worker = Returns(nothing),
+             stdout = Base.stdout,
+             stderr = Base.stderr)
+    runtests(mod::Module, ARGS; ...)
 
 Run Julia tests in parallel across multiple worker processes.
 
@@ -459,13 +600,13 @@ Run Julia tests in parallel across multiple worker processes.
 
 - `mod`: The module calling runtests
 - `ARGS`: Command line arguments array, typically from `Base.ARGS`. When you run the tests
-  with `Pkg.test`, this can be changed with the `test_args` keyword argument.
+  with `Pkg.test`, this can be changed with the `test_args` keyword argument. If the caller
+  needs to accept args too, consider using `parse_args` to parse the arguments first.
 
 Several keyword arguments are also supported:
 
-- `RecordType`: Type of test record to use for tracking test results (default: `TestRecord`)
-- `test_filter`: Optional function to filter which tests to run (default: run all tests)
-- `custom_tests`: Optional dictionary of custom tests, mapping test names to expressions.
+- `testsuite`: Dictionary mapping test names to expressions to execute (default: `find_tests(pwd())`).
+  By default, automatically discovers all `.jl` files in the test directory.
 - `init_code`: Code use to initialize each test's sandbox module (e.g., import auxiliary
   packages, define constants, etc).
 - `test_worker`: Optional function that takes a test name and returns a specific worker.
@@ -494,17 +635,28 @@ Several keyword arguments are also supported:
 ## Examples
 
 ```julia
-# Run all tests with default settings
+# Run all tests with default settings (auto-discovers .jl files)
 runtests(MyModule, ARGS)
 
 # Run only tests matching "integration"
 runtests(MyModule, ["integration"])
 
-# Run with custom filter function
-runtests(MyModule, ARGS; test_filter = test -> occursin("unit", test))
+# Define a custom test suite
+testsuite = Dict(
+    "custom" => quote
+        @test 1 + 1 == 2
+    end
+)
+runtests(MyModule, ARGS; testsuite)
 
-# Use custom test record type
-runtests(MyModule, ARGS; RecordType = MyCustomTestRecord)
+# Customize the test suite
+testsuite = find_tests(pwd())
+args = parse_args(ARGS)
+if filter_tests!(testsuite, args)
+    # Remove a specific test
+    delete!(testsuite, "slow_test")
+end
+runtests(MyModule, args; testsuite)
 ```
 
 ## Memory Management
@@ -512,119 +664,42 @@ runtests(MyModule, ARGS; RecordType = MyCustomTestRecord)
 Workers are automatically recycled when they exceed memory limits to prevent out-of-memory
 issues during long test runs. The memory limit is set based on system architecture.
 """
-function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = TestRecord,
-                  custom_tests::Dict{String, Expr}=Dict{String, Expr}(), init_code = :(),
-                  test_worker = Returns(nothing), stdout = Base.stdout, stderr = Base.stderr)
+function runtests(mod::Module, args::ParsedArgs;
+                  testsuite::Dict{String,Expr} = find_tests(pwd()),
+                  init_code = :(), test_worker = Returns(nothing),
+                  stdout = Base.stdout, stderr = Base.stderr)
     #
     # set-up
     #
 
-    do_help, _ = extract_flag!(ARGS, "--help")
-    if do_help
-        println(
-            """
-            Usage: runtests.jl [--help] [--list] [--jobs=N] [TESTS...]
-
-               --help             Show this text.
-               --list             List all available tests.
-               --verbose          Print more information during testing.
-               --quickfail        Fail the entire run as soon as a single test errored.
-               --jobs=N           Launch `N` processes to perform tests.
-
-               Remaining arguments filter the tests that will be executed."""
-        )
-        exit(0)
-    end
-    set_jobs, jobs = extract_flag!(ARGS, "--jobs"; typ = Int)
-    do_verbose, _ = extract_flag!(ARGS, "--verbose")
-    do_quickfail, _ = extract_flag!(ARGS, "--quickfail")
-    do_list, _ = extract_flag!(ARGS, "--list")
-    ## no options should remain
-    optlike_args = filter(startswith("-"), ARGS)
-    if !isempty(optlike_args)
-        error("Unknown test options `$(join(optlike_args, " "))` (try `--help` for usage instructions)")
-    end
-
-    WORKDIR = pwd()
-
-    # choose tests
-    tests = []
-    test_runners = Dict()
-    ## custom tests by the user
-    for (name, runner) in custom_tests
-        push!(tests, name)
-        test_runners[name] = runner
-    end
-    ## files in the test folder
-    for (rootpath, dirs, files) in walkdir(WORKDIR)
-        # find Julia files
-        filter!(files) do file
-            endswith(file, ".jl") && file !== "runtests.jl"
-        end
-        isempty(files) && continue
-
-        # strip extension
-        files = map(files) do file
-            file[1:(end - 3)]
-        end
-
-        # prepend subdir
-        subdir = relpath(rootpath, WORKDIR)
-        if subdir != "."
-            files = map(files) do file
-                joinpath(subdir, file)
-            end
-        end
-
-        # unify path separators
-        files = map(files) do file
-            replace(file, path_separator => '/')
-        end
-
-        append!(tests, files)
-        for file in files
-            test_runners[file] = quote
-                include($(joinpath(WORKDIR, file * ".jl")))
-            end
-        end
-    end
-    ## finalize
-    unique!(tests)
-    Random.shuffle!(tests)
-    historical_durations = load_test_history(mod)
-    sort!(tests, by = x -> -get(historical_durations, x, Inf))
-
     # list tests, if requested
-    if do_list
+    if args.list !== nothing
         println(stdout, "Available tests:")
-        for test in sort(tests)
+        for test in keys(testsuite)
             println(stdout, " - $test")
         end
         exit(0)
     end
 
     # filter tests
-    if isempty(ARGS)
-        filter!(test_filter, tests)
-    else
-        # let the user filter
-        filter!(tests) do test
-            any(arg -> startswith(test, arg), ARGS)
-        end
-    end
+    filter_tests!(testsuite, args)
+
+    # determine test order
+    tests = collect(keys(testsuite))
+    Random.shuffle!(tests)
+    historical_durations = load_test_history(mod)
+    sort!(tests, by = x -> -get(historical_durations, x, Inf))
 
     # determine parallelism
-    if !set_jobs
-        jobs = default_njobs()
-    end
+    jobs = something(args.jobs, default_njobs())
     jobs = clamp(jobs, 1, length(tests))
     println(stdout, "Running $jobs tests in parallel. If this is too many, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
-    workers = addworkers(min(jobs, length(tests)))
-    nworkers = length(workers)
+    nworkers = min(jobs, length(tests))
+    workers = fill(nothing, nworkers)
 
     t0 = time()
     results = []
-    running_tests = Dict{String, Tuple{Int, Float64}}()  # test => (worker, start_time)
+    running_tests = Dict{String, Float64}()  # test => start_time
     test_lock = ReentrantLock() # to protect crucial access to tests and running_tests
 
     done = false
@@ -659,8 +734,8 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
         stderr.lock = print_lock
     end
 
-    io_ctx = test_IOContext(RecordType, stdout, stderr, print_lock, name_align)
-    print_header(RecordType, io_ctx, testgroupheader, workerheader)
+    io_ctx = test_IOContext(stdout, stderr, print_lock, name_align)
+    print_header(io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
 
@@ -685,9 +760,9 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
         line1 = ""
 
         # line 2: running tests
-        test_list = sort(collect(running_tests), by = x -> x[2][2])
-        status_parts = map(test_list) do (test, (wrkr, _))
-            "$test ($wrkr)"
+        test_list = sort(collect(keys(running_tests)), by = x -> running_tests[x])
+        status_parts = map(test_list) do test
+            "$test"
         end
         line2 = "Running:  " * join(status_parts, ", ")
         ## truncate
@@ -707,7 +782,7 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
 
             est_remaining = 0.0
             ## currently-running
-            for (test, (_, start_time)) in running_tests
+            for (test, start_time) in running_tests
                 elapsed = time() - start_time
                 duration = get(historical_durations, test, est_per_test)
                 est_remaining += max(0.0, duration - elapsed)
@@ -755,9 +830,9 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
                         test_name, wrkr = msg[2], msg[3]
 
                         # Optionally print verbose started message
-                        if do_verbose
+                        if args.verbose !== nothing
                             clear_status()
-                            print_test_started(RecordType, wrkr, test_name, io_ctx)
+                            print_test_started(wrkr, test_name, io_ctx)
                         end
 
                     elseif msg_type == :finished
@@ -774,7 +849,7 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
                         test_name, wrkr = msg[2], msg[3]
 
                         clear_status()
-                        print_test_crashed(RecordType, wrkr, test_name, io_ctx)
+                        print_test_crashed(wrkr, test_name, io_ctx)
                     end
                 end
 
@@ -813,29 +888,32 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
     for p in workers
         push!(worker_tasks, @async begin
             while !done
-                # if a worker failed, spawn a new one
-                if !Malt.isrunning(p)
-                    p = addworker()
-                end
-
                 # get a test to run
-                test, wrkr, test_t0 = Base.@lock test_lock begin
+                test, test_t0 = Base.@lock test_lock begin
                     isempty(tests) && break
                     test = popfirst!(tests)
-                    wrkr = something(test_worker(test), p)
 
                     test_t0 = time()
-                    running_tests[test] = (worker_id(wrkr), test_t0)
+                    running_tests[test] = test_t0
 
-                    test, wrkr, test_t0
+                    test, test_t0
+                end
+
+                # if a worker failed, spawn a new one
+                wrkr = test_worker(test)
+                if wrkr ===  nothing
+                    wrkr = p
+                end
+                if wrkr === nothing || !Malt.isrunning(wrkr)
+                    wrkr = p = addworker()
                 end
 
                 # run the test
                 put!(printer_channel, (:started, test, worker_id(wrkr)))
                 result = try
                     Malt.remote_eval_wait(Main, wrkr, :(import ParallelTestRunner))
-                    Malt.remote_call_fetch(invokelatest, wrkr, runtest, RecordType, test_runners[test], test,
-                                              init_code, io_ctx.color)
+                    Malt.remote_call_fetch(invokelatest, wrkr, runtest,
+                                           testsuite[test], test, init_code, io_ctx.color)
                 catch ex
                     if isa(ex, InterruptException)
                         # the worker got interrupted, signal other tasks to stop
@@ -850,8 +928,11 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
 
                 # act on the results
                 if result isa AbstractTestRecord
-                    @assert result isa RecordType
                     put!(printer_channel, (:finished, test, worker_id(wrkr), result))
+                    if anynonpass(result[]) && args.quickfail !== nothing
+                        stop_work()
+                        break
+                    end
 
                     if memory_usage(result) > max_worker_rss
                         # the worker has reached the max-rss limit, recycle it
@@ -862,8 +943,9 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
                     # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
                     @assert result isa Exception
                     put!(printer_channel, (:crashed, test, worker_id(wrkr)))
-                    if do_quickfail
+                    if args.quickfail !== nothing
                         stop_work()
+                        break
                     end
 
                     # the worker encountered some serious failure, recycle it
@@ -971,7 +1053,7 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
         return testset
     end
     t1 = time()
-    o_ts = create_testset("Overall"; start=t0, stop=t1, verbose=do_verbose)
+    o_ts = create_testset("Overall"; start=t0, stop=t1, verbose=!isnothing(args.verbose))
     function collect_results()
         with_testset(o_ts) do
             completed_tests = Set{String}()
@@ -1048,6 +1130,7 @@ function runtests(mod::Module, ARGS; test_filter = Returns(true), RecordType = T
     end
 
     return
-end # runtests
+end
+runtests(mod::Module, ARGS; kwargs...) = runtests(mod, parse_args(ARGS); kwargs...)
 
-end # module ParallelTestRunner
+end
