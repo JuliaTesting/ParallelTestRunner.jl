@@ -252,22 +252,27 @@ function runtest(f, name, init_code, color)
             GC.gc(true)
             Random.seed!(1)
 
-            mktemp() do path, io
-                stats = redirect_stdio(stdout=io, stderr=io) do
-                    # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
-                    # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
-                    # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
-                    @timed @testset WorkerTestSet "placeholder" begin
-                        @testset DefaultTestSet $name begin
-                            $f
-                        end
+            pipe = Pipe()
+            pipe_initialized = Channel{Nothing}(1)
+            reader = @async begin
+                take!(pipe_initialized)
+                read(pipe, String)
+            end
+            stats = redirect_stdio(stdout=pipe, stderr=pipe) do
+                put!(pipe_initialized, nothing)
+
+                # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
+                # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
+                # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
+                @timed @testset WorkerTestSet "placeholder" begin
+                    @testset DefaultTestSet $name begin
+                        $f
                     end
                 end
-                close(io)
-                output = read(path, String)
-                (; testset=stats.value, output, stats.time, stats.bytes, stats.gctime)
-
             end
+            close(pipe.in)
+            output = fetch(reader)
+            (; testset=stats.value, output, stats.time, stats.bytes, stats.gctime)
         end
 
         # process results
