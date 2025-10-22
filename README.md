@@ -69,6 +69,20 @@ end
 runtests(MyModule, ARGS; init_code)
 ```
 
+### Interactive use
+
+Arguments can also be passed via the standard `Pkg.test` interface for interactive control. For example, here is how we might run the subset of tests that start with the testset name "MytestsetA" in i) verbose mode, and ii) with default threading enabled:
+
+```julia-repl
+# In the root directory of `MyPackage.jl`
+julia --proj
+
+julia> using Pkg
+
+# No need to start a fresh session to change threading
+julia> Pkg.test("MyModule"; test_args=`--verbose MytestsetA`, julia_args=`--threads=auto`);
+```
+
 ## Packages using ParallelTestRunner.jl
 
 There are a few packages already using `ParallelTestRunner.jl` to parallelize their tests, you can look at their setups if you need inspiration to move your packages as well:
