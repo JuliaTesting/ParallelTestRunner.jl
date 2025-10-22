@@ -85,7 +85,7 @@ julia> Pkg.test("MyModule"; test_args=`--verbose MyTestsetA`, julia_args=`--thre
 Alternatively, arguments can be passed directly from the command line with a shell alias like the one below:
 
 ```julia-repl
-jltest -- --verbose MyTestsetA
+jltest --threads=auto -- --verbose MyTestsetA
 ```
 
 <details><summary>Shell alias</summary> 
@@ -100,7 +100,7 @@ function jltest {
         shift
     fi
 
-    "${julia[@]}" --startup-file=no --threads=auto --project -e "using Pkg; Pkg.API.test(; test_args=ARGS)" "$@"
+    "${julia[@]}" --startup-file=no --project -e "using Pkg; Pkg.API.test(; test_args=ARGS)" "$@"
 }
 ```  
 
