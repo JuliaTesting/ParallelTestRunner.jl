@@ -71,7 +71,7 @@ runtests(MyModule, ARGS; init_code)
 
 ### Interactive use
 
-Arguments can also be passed via the standard `Pkg.test` interface for interactive control. For example, here is how we might run the subset of tests that start with the testset name "MytestsetA" in i) verbose mode, and ii) with default threading enabled:
+Arguments can also be passed via the standard `Pkg.test` interface for interactive control. For example, here is how we could run the subset of tests that start with the testset name "MyTestsetA" in i) verbose mode, and ii) with default threading enabled:
 
 ```julia-repl
 # In an environment where `MyPackage.jl` is available
@@ -80,8 +80,31 @@ julia --proj
 julia> using Pkg
 
 # No need to start a fresh session to change threading
-julia> Pkg.test("MyModule"; test_args=`--verbose MytestsetA`, julia_args=`--threads=auto`);
+julia> Pkg.test("MyModule"; test_args=`--verbose MyTestsetA`, julia_args=`--threads=auto`);
 ```
+Alternatively, arguments can be passed directly from the command line with a shell alias like the one below:
+
+```julia-repl
+jltest -- --verbose MyTestsetA
+```
+
+<details><summary>Shell alias</summary> 
+
+```shell
+function jltest {
+    julia=(julia)
+
+    # certain arguments (like those beginnning with a +) need to come first
+    if [[ $# -gt 0 && "$1" = +* ]]; then
+        julia+=("$1")
+        shift
+    fi
+
+    "${julia[@]}" --startup-file=no --threads=auto --project -e "using Pkg; Pkg.API.test(; test_args=ARGS)" "$@"
+}
+```  
+
+</details>
 
 ## Packages using ParallelTestRunner.jl
 
