@@ -416,7 +416,7 @@ Add `X` worker processes.
 addworkers(X; kwargs...) = [addworker(; kwargs...) for _ in 1:X]
 
 """
-    addworker(; env=Vector{Pair{String, String}}())
+    addworker(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing)
 
 Add a single worker process. 
 
