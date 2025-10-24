@@ -360,7 +360,9 @@ Determine default number of parallel jobs.
 function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_memory())
     jobs = cpu_threads
     memory_jobs = Int64(free_memory) ÷ (2 * 2^30)
-    return max(1, min(jobs, memory_jobs))
+    env_var_num_jobs = tryparse(Int, get(ENV, "PARALLELTESTRUNNER_NUM_JOBS", ""))
+    # `PARALLELTESTRUNNER_NUM_JOBS` would take precedence over the default calculation.
+    return something(env_var_num_jobs, max(1, min(jobs, memory_jobs)))
 end
 
 # Historical test duration database

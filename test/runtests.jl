@@ -223,4 +223,11 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "Number of jobs" begin
+    num_jobs = 1234
+    withenv("PARALLELTESTRUNNER_NUM_JOBS" => num_jobs) do
+        @test ParallelTestRunner.default_njobs() == num_jobs
+    end
+end
+
 end
