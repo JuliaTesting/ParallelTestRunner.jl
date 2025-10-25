@@ -484,7 +484,7 @@ function find_tests(dir::String)
         end
 
         for file in files
-            path = joinpath(rootpath, file * ".jl")
+            path = joinpath(rootpath, basename(file * ".jl"))
             tests[file] = :(include($path))
         end
     end
