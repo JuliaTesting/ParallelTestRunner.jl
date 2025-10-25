@@ -24,6 +24,13 @@ cd(@__DIR__)
     @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
 end
 
+@testset "subdir use" begin
+    d = pwd()
+    testsuite = find_tests(d)
+    @test last(testsuite["basic"].args) == joinpath(d, "basic.jl")
+    @test last(testsuite["subdir/subdir_test"].args) == joinpath(d, "subdir/subdir_test.jl")
+end
+
 @testset "custom tests" begin
     testsuite = Dict(
         "custom" => quote
