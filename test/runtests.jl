@@ -28,7 +28,7 @@ end
     d = pwd()
     testsuite = find_tests(d)
     @test last(testsuite["basic"].args) == joinpath(d, "basic.jl")
-    @test last(testsuite["subdir/subdir_test"].args) == joinpath(d, joinpath("subdir", "subdir_test.jl"))
+    @test last(testsuite["subdir/subdir_test"].args) == joinpath(d, "subdir", "subdir_test.jl")
 end
 
 @testset "custom tests" begin
