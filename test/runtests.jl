@@ -25,7 +25,7 @@ cd(@__DIR__)
 end
 
 @testset "subdir use" begin
-    d = pwd()
+    d = @__DIR__
     testsuite = find_tests(d)
     @test last(testsuite["basic"].args) == joinpath(d, "basic.jl")
     @test last(testsuite["subdir/subdir_test"].args) == joinpath(d, "subdir", "subdir_test.jl")
