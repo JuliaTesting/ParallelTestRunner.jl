@@ -12,7 +12,7 @@ using Serialization
 import Test
 import Random
 import IOCapture
-import Test: DefaultTestSet
+using Test: DefaultTestSet
 
 function anynonpass(ts::Test.AbstractTestSet)
     @static if VERSION >= v"1.13.0-DEV.1037"
@@ -240,11 +240,11 @@ function runtest(f, name, init_code, color)
     function inner()
         # generate a temporary module to execute the tests in
         mod = @eval(Main, module $(gensym(name)) end)
-        @eval(mod, import ParallelTestRunner: Test, Random)
+        @eval(mod, using ParallelTestRunner: Test, Random)
         @eval(mod, using .Test, .Random)
         # Both bindings must be imported since `@testset` can't handle fully-qualified names when VERSION < v"1.11.0-DEV.1518".
-        @eval(mod, import ParallelTestRunner: WorkerTestSet)
-        @eval(mod, import Test: DefaultTestSet)
+        @eval(mod, using ParallelTestRunner: WorkerTestSet)
+        @eval(mod, using Test: DefaultTestSet)
 
         Core.eval(mod, init_code)
 
