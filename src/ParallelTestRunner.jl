@@ -258,7 +258,8 @@ function runtest(f, name, init_code, color)
                 take!(pipe_initialized)
                 read(pipe, String)
             end
-            stats = redirect_stdio(stdout=pipe, stderr=pipe) do
+            io = IOContext(pipe, :color=>$(color))
+            stats = redirect_stdio(; stdout=io, stderr=io) do
                 put!(pipe_initialized, nothing)
 
                 # @testset CustomTestRecord switches the all lower-level testset to our custom testset,

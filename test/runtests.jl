@@ -230,4 +230,32 @@ end
     @test contains(str, "SUCCESS")
 end
 
+# Issue <https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/69>.
+@testset "colorful output" begin
+    testsuite = Dict(
+        "color" => quote
+            printstyled("Roses Are Red"; color=:red)
+        end
+    )
+    io = IOBuffer()
+    ioc = IOContext(io, :color => true)
+    runtests(ParallelTestRunner, String[]; testsuite, stdout=ioc, stderr=ioc)
+    str = String(take!(io))
+    @test contains(str, "\e[31mRoses Are Red\e[39m\n")
+    @test contains(str, "SUCCESS")
+
+    testsuite = Dict(
+        "no color" => quote
+            print("Violets are ")
+            printstyled("blue"; color=:blue)
+        end
+    )
+    io = IOBuffer()
+    ioc = IOContext(io, :color => false)
+    runtests(ParallelTestRunner, String[]; testsuite, stdout=ioc, stderr=ioc)
+    str = String(take!(io))
+    @test contains(str, "Violets are blue\n")
+    @test contains(str, "SUCCESS")
+end
+
 end
