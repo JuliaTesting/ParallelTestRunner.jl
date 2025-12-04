@@ -116,25 +116,6 @@ The `test_worker` function receives the test name and should return either:
 - A worker object (from [`addworker`](@ref) for tests that need special configuration
 - `nothing` to use the default worker pool
 
-## Custom Output Streams
-
-You can redirect output to custom I/O streams:
-
-```julia
-using ParallelTestRunner
-
-io = IOBuffer()
-runtests(MyPackage, ARGS; stdout=io, stderr=io)
-
-# Process the output
-output = String(take!(io))
-```
-
-This is useful for:
-- Capturing test output for analysis
-- Writing to log files
-- Suppressing output in certain contexts
-
 ## Custom Arguments
 
 If your package needs to accept its own command-line arguments in addition to `ParallelTestRunner`'s options, use [`parse_args`](@ref) with custom flags:
