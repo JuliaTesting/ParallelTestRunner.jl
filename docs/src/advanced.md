@@ -137,7 +137,7 @@ runtests(MyPackage, args)
 
 Custom flags are stored in the `custom` field of the `ParsedArgs` object, with values of `nothing` (not set) or `Some(value)` (set, with optional value).
 
-### Interactive use
+## Interactive use
 
 Arguments can also be passed via the standard `Pkg.test` interface for interactive control. For example, here is how we could run the subset of tests that start with the testset name "MyTestsetA" in i) verbose mode, and ii) with default threading enabled:
 
