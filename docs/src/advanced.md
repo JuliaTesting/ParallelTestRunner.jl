@@ -158,7 +158,7 @@ jltest --threads=auto -- --verbose MyTestsetA
 
 Shell alias:
 
-```shell
+```bash
 function jltest {
     julia=(julia)
 
