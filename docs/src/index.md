@@ -93,14 +93,11 @@ Pkg.test("MyPackage"; test_args=`--verbose --jobs=4 integration`)
 ### Automatic Test Discovery
 
 `ParallelTestRunner` automatically discovers all `.jl` files in your `test/` directory and subdirectories, excluding `runtests.jl`.
-Tests are sorted by file size (largest first) for optimal load balancing.
 
 ### Parallel Execution
 
-Tests run concurrently in isolated worker processes, each with:
-- Its own sandbox module
-- Independent memory space
-- Automatic resource cleanup
+Tests run concurrently in isolated worker processes, each inside own module.
+`ParallelTestRunner` records historical tests duration for each package, so that in subsequent runs long-running tests are executed first, to improve load balancing.
 
 ### Real-time Progress
 
