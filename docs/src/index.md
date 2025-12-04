@@ -115,8 +115,8 @@ Example output:
 
 ```
 Test                    | Time (s) |  GC (s) | GC % | Alloc (MB) | RSS (MB) |
-basic (1)               |    0.12  |   0.01  |  8.3 |     5.23   |  125.45  |
-integration (2)         |    2.45  |   0.15  |  6.1 |    45.67   |  234.12  |
+basic               (1) |    0.12  |   0.01  |  8.3 |     5.23   |  125.45  |
+integration         (2) |    2.45  |   0.15  |  6.1 |    45.67   |  234.12  |
 ```
 
 ### Graceful Interruption
@@ -125,8 +125,6 @@ Press `Ctrl+C` to interrupt the test run. The framework will:
 - Clean up running tests
 - Display a summary of completed tests
 - Exit gracefully
-
-You can also press `?` during execution to see which tests are currently running.
 
 ## Test File Structure
 
@@ -143,3 +141,20 @@ end
 ```
 
 Each test file runs in its own isolated module, so you don't need to worry about test pollution between files.
+
+## Packages using ParallelTestRunner.jl
+
+There are a few packages already [using `ParallelTestRunner.jl`](https://github.com/search?q=%22using+ParallelTestRunner%22+language%3AJulia++NOT+is%3Aarchived+NOT+is%3Afork&type=code) to parallelize their tests, you can look at their setups if you need inspiration to move your packages as well:
+
+* [`ApproxFun.jl`](https://github.com/JuliaApproximation/ApproxFun.jl/blob/master/test/runtests.jl)
+* [`BlockArrays.jl`](https://github.com/JuliaArrays/BlockArrays.jl/blob/master/test/runtests.jl)
+* [`CuNESSie.jl`](https://github.com/tkemmer/CuNESSie.jl/blob/master/test/runtests.jl)
+* [`Enzyme.jl`](https://github.com/EnzymeAD/Enzyme.jl/blob/main/test/runtests.jl)
+* [`GPUArrays.jl`](https://github.com/JuliaGPU/GPUArrays.jl/blob/master/test/runtests.jl)
+* [`GPUCompiler.jl`](https://github.com/JuliaGPU/GPUCompiler.jl/blob/master/test/runtests.jl)
+* [`HyperHessians.jl`](https://github.com/KristofferC/HyperHessians.jl/blob/master/test/runtests.jl)
+* [`Metal.jl`](https://github.com/JuliaGPU/Metal.jl/blob/main/test/runtests.jl)
+* [`WCS.jl`](https://github.com/JuliaAstro/WCS.jl/blob/master/test/runtests.jl)
+
+## Inspiration
+Based on [@maleadt](https://github.com/maleadt) test infrastructure for [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl).

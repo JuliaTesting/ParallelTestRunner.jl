@@ -9,13 +9,12 @@ end
 
 This page covers advanced features of `ParallelTestRunner` for customizing test execution.
 
-## Custom Test Suites
+## Customizing the test suite
 
-By default, `runtests` automatically discovers all `.jl` files in your test directory. You can provide a custom test suite dictionary to have full control over which tests run:
+By default, [`runtests`](@ref) automatically discovers all `.jl` files in your `test/` directory (excluding `runtests.jl` itself) using the `find_tests` function.
+You can customize which tests to run by providing a custom `testsuite` dictionary:
 
 ```julia
-using ParallelTestRunner
-
 # Manually define your test suite
 testsuite = Dict(
     "basic" => quote
@@ -26,43 +25,39 @@ testsuite = Dict(
     end
 )
 
-runtests(MyPackage, ARGS; testsuite)
+runtests(MyModule, ARGS; testsuite)
 ```
 
-Each value in the dictionary should be an expression (use `quote...end`) that executes the test code.
+## Filtering Test Files
 
-## Filtering Tests
-
-You can use `find_tests` to automatically discover tests and then filter or modify them:
+You can also use [`find_tests`](@ref) to automatically discover test files and then filter or modify them.
+This requires manually parsing arguments so that filtering is only applied when the user did not request specific tests to run:
 
 ```julia
-using ParallelTestRunner
-
 # Start with autodiscovered tests
 testsuite = find_tests(pwd())
 
-# Parse arguments manually
+# Parse arguments
 args = parse_args(ARGS)
 
-# Filter based on arguments
 if filter_tests!(testsuite, args)
-    # Additional filtering is allowed
-    # For example, remove platform-specific tests
+    # Remove tests that shouldn't run on Windows
     if Sys.iswindows()
-        delete!(testsuite, "unix_only_test")
+        delete!(testsuite, "ext/specialfunctions")
     end
 end
 
-runtests(MyPackage, args; testsuite)
+runtests(MyModule, args; testsuite)
 ```
 
-The `filter_tests!` function returns `true` if no positional arguments were provided (allowing additional filtering) and `false` if the user specified specific tests (preventing further filtering).
+The [`filter_tests!`](@ref) function returns `true` if no positional arguments were provided (allowing additional filtering) and `false` if the user specified specific tests (preventing further filtering).
 
 ## Initialization Code
 
-Use the `init_code` keyword argument to provide code that runs before each test file. This is useful for:
+Use the `init_code` keyword argument to [`runtests`](@ref) to provide code that runs before each test file.
+This is useful for:
 - Importing packages
-- Defining constants or helper functions
+- Defining constants, defaults or helper functions
 - Setting up test infrastructure
 
 ```julia
@@ -118,7 +113,7 @@ runtests(MyPackage, ARGS; test_worker, testsuite)
 ```
 
 The `test_worker` function receives the test name and should return either:
-- A worker object (from `addworker`) for tests that need special configuration
+- A worker object (from [`addworker`](@ref) for tests that need special configuration
 - `nothing` to use the default worker pool
 
 ## Custom Output Streams
@@ -142,7 +137,7 @@ This is useful for:
 
 ## Custom Arguments
 
-If your package needs to accept its own command-line arguments in addition to `ParallelTestRunner`'s options, use `parse_args` with custom flags:
+If your package needs to accept its own command-line arguments in addition to `ParallelTestRunner`'s options, use [`parse_args`](@ref) with custom flags:
 
 ```julia
 using ParallelTestRunner
@@ -179,6 +174,41 @@ workers = addworkers(4; env = ["THREADS" => "1"])
 ```
 
 Workers created this way can be used with the `test_worker` function or for other distributed computing tasks.
+
+### Interactive use
+
+Arguments can also be passed via the standard `Pkg.test` interface for interactive control. For example, here is how we could run the subset of tests that start with the testset name "MyTestsetA" in i) verbose mode, and ii) with default threading enabled:
+
+```julia-repl
+# In an environment where `MyPackage.jl` is available
+julia --proj
+
+julia> using Pkg
+
+# No need to start a fresh session to change threading
+julia> Pkg.test("MyModule"; test_args=`--verbose MyTestsetA`, julia_args=`--threads=auto`);
+```
+Alternatively, arguments can be passed directly from the command line with a shell alias like the one below:
+
+```julia-repl
+jltest --threads=auto -- --verbose MyTestsetA
+```
+
+Shell alias:
+
+```shell
+function jltest {
+    julia=(julia)
+
+    # certain arguments (like those beginnning with a +) need to come first
+    if [[ $# -gt 0 && "$1" = +* ]]; then
+        julia+=("$1")
+        shift
+    fi
+
+    "${julia[@]}" --startup-file=no --project -e "using Pkg; Pkg.API.test(; test_args=ARGS)" "$@"
+}
+```
 
 ## Best Practices
 
