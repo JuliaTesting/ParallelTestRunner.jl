@@ -80,7 +80,7 @@ The `init_code` is evaluated in each test's sandbox module, so all definitions a
 
 ## Custom Workers
 
-For tests that require specific environment variables or Julia flags, you can use the `test_worker` keyword argument to assign tests to custom workers:
+For tests that require specific environment variables or Julia flags, you can use the `test_worker` keyword argument to [`runtests`](@ref) to assign tests to custom workers:
 
 ```julia
 using ParallelTestRunner
@@ -136,25 +136,6 @@ runtests(MyPackage, args)
 ```
 
 Custom flags are stored in the `custom` field of the `ParsedArgs` object, with values of `nothing` (not set) or `Some(value)` (set, with optional value).
-
-## Manual Worker Management
-
-For advanced use cases, you can manually create workers:
-
-```julia
-using ParallelTestRunner
-
-# Add a single worker with custom configuration
-worker = addworker(
-    env = ["CUSTOM_VAR" => "value"],
-    exeflags = ["--check-bounds=no"]
-)
-
-# Add multiple workers
-workers = addworkers(4; env = ["THREADS" => "1"])
-```
-
-Workers created this way can be used with the `test_worker` function or for other distributed computing tasks.
 
 ### Interactive use
 
