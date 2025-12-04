@@ -48,7 +48,7 @@ Pkg.test("MyPackage")
 
 ## Command Line Options
 
-You can pass various options to control test execution:
+You can pass various options to the `runtests.jl` script to control test execution:
 
 ```bash
 julia --project test/runtests.jl [OPTIONS] [TESTS...]
@@ -90,7 +90,7 @@ Pkg.test("MyPackage"; test_args=`--verbose --jobs=4 integration`)
 
 ## Features
 
-### Automatic Test Discovery
+### Automatic Test Files Discovery
 
 `ParallelTestRunner` automatically discovers all `.jl` files in your `test/` directory and subdirectories, excluding `runtests.jl`.
 
