@@ -17,9 +17,3 @@ makedocs(;
         "API Reference" => "api.md",
     ],
 )
-
-deploydocs(;
-    repo="github.com/JuliaTesting/ParallelTestRunner.jl",
-    devbranch="main",
-)
-
