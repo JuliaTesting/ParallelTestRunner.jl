@@ -214,11 +214,11 @@ function jltest {
 
 1. **Keep tests isolated**: Each test file runs in its own module, so avoid relying on global state between tests.
 
-2. **Use `init_code` for common setup**: Instead of duplicating setup code in each test file, use `init_code` to share common initialization.
+1. **Use `init_code` for common setup**: Instead of duplicating setup code in each test file, use `init_code` to share common initialization.
 
-3. **Filter tests appropriately**: Use `filter_tests!` to respect user-specified test filters while allowing additional programmatic filtering.
+1. **Filter tests appropriately**: Use [`filter_tests!`](@ref) to respect user-specified test filters while allowing additional programmatic filtering.
 
-4. **Handle platform differences**: Use conditional logic in your test suite setup to handle platform-specific tests:
+1. **Handle platform differences**: Use conditional logic in your test suite setup to handle platform-specific tests:
 
    ```julia
    testsuite = find_tests(pwd())
@@ -227,4 +227,7 @@ function jltest {
    end
    ```
 
-5. **Use custom workers sparingly**: Custom workers add overhead. Only use them when tests genuinely require different configurations.
+1. **Load balance the test files**: `ParallelTestRunner` runs the tests files in parallel, ideally all test files should run for _roughly_ the same time for better performance.
+   Having few long-running test files and other short-running ones hinders scalability.
+
+1. **Use custom workers sparingly**: Custom workers add overhead. Only use them when tests genuinely require different configurations.
