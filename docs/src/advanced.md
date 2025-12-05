@@ -139,21 +139,24 @@ Custom flags are stored in the `custom` field of the `ParsedArgs` object, with v
 
 ## Interactive use
 
-Arguments can also be passed via the standard `Pkg.test` interface for interactive control. For example, here is how we could run the subset of tests that start with the testset name "MyTestsetA" in i) verbose mode, and ii) with default threading enabled:
+Arguments can also be passed via the standard [`Pkg.test`](https://pkgdocs.julialang.org/v1/api/#Pkg.test) interface for interactive control.
+For example, here is how we could run the subset of test files that start with the name `test_cool_feature` in i) verbose mode, and ii) with a specific number of Julia threads enabled:
 
+```bash
+# Start julia in an environment where `MyPackage.jl` is available
+julia --project
+```
 ```julia-repl
-# In an environment where `MyPackage.jl` is available
-julia --proj
-
 julia> using Pkg
 
 # No need to start a fresh session to change threading
-julia> Pkg.test("MyModule"; test_args=`--verbose MyTestsetA`, julia_args=`--threads=auto`);
+julia> Pkg.test("MyModule"; test_args=`--verbose test_cool_feature`, julia_args=`--threads=auto`);
 ```
+
 Alternatively, arguments can be passed directly from the command line with a shell alias like the one below:
 
 ```julia-repl
-jltest --threads=auto -- --verbose MyTestsetA
+jltest --threads=auto -- --verbose test_cool_feature
 ```
 
 Shell alias:

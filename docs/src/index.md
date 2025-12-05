@@ -61,7 +61,7 @@ julia --project test/runtests.jl [OPTIONS] [TESTS...]
 - `--verbose`: Print more detailed information during test execution (including start times for each test)
 - `--quickfail`: Stop the entire test run as soon as any test fails
 - `--jobs=N`: Use `N` worker processes (default: based on CPU threads and available memory)
-- `TESTS...`: Filter tests by name using prefix matching
+- `TESTS...`: Filter test files by name, matched using `startswith`
 
 ### Examples
 
