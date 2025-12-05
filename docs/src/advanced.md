@@ -113,7 +113,7 @@ runtests(MyPackage, ARGS; test_worker, testsuite)
 ```
 
 The `test_worker` function receives the test name and should return either:
-- A worker object (from [`addworker`](@ref) for tests that need special configuration
+- A worker object (from [`addworker`](@ref)) for tests that need special configuration
 - `nothing` to use the default worker pool
 
 ## Custom Arguments
