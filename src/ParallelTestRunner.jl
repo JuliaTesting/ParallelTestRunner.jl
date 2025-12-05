@@ -654,12 +654,12 @@ Several keyword arguments are also supported:
 ## Behavior
 
 - Automatically discovers all `.jl` files in the test directory (excluding `runtests.jl`)
-- Sorts tests by file size (largest first) for load balancing
+- Sorts test files by runtime (longest-running are started first) for load balancing
 - Launches worker processes with appropriate Julia flags for testing
 - Monitors memory usage and recycles workers that exceed memory limits
 - Provides real-time progress output with timing and memory statistics
 - Handles interruptions gracefully (Ctrl+C)
-- Returns nothing, but throws `Test.FallbackTestSetException` if any tests fail
+- Returns `nothing`, but throws `Test.FallbackTestSetException` if any tests fail
 
 ## Examples
 
