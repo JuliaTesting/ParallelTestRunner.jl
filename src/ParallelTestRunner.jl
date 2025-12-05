@@ -410,9 +410,15 @@ const WORKER_IDS = Dict{Int32, Int32}()
 worker_id(wrkr) = WORKER_IDS[wrkr.proc_pid]
 
 """
-    addworkers(X; kwargs...)
+    addworkers(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing)
 
 Add `X` worker processes.
+To add a single worker, use [`addworker`](@ref).
+
+## Arguments
+- `env`: Vector of environment variable pairs to set for the worker process.
+- `exename`: Custom executable to use for the worker process.
+- `exeflags`: Custom flags to pass to the worker process.
 """
 addworkers(X; kwargs...) = [addworker(; kwargs...) for _ in 1:X]
 
@@ -420,6 +426,7 @@ addworkers(X; kwargs...) = [addworker(; kwargs...) for _ in 1:X]
     addworker(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing)
 
 Add a single worker process. 
+To add multiple workers, use [`addworkers`](@ref).
 
 ## Arguments
 - `env`: Vector of environment variable pairs to set for the worker process.
@@ -623,11 +630,11 @@ Run Julia tests in parallel across multiple worker processes.
 - `mod`: The module calling runtests
 - `ARGS`: Command line arguments array, typically from `Base.ARGS`. When you run the tests
   with `Pkg.test`, this can be changed with the `test_args` keyword argument. If the caller
-  needs to accept args too, consider using `parse_args` to parse the arguments first.
+  needs to accept args too, consider using [`parse_args`](@ref) to parse the arguments first.
 
 Several keyword arguments are also supported:
 
-- `testsuite`: Dictionary mapping test names to expressions to execute (default: `find_tests(pwd())`).
+- `testsuite`: Dictionary mapping test names to expressions to execute (default: [`find_tests(pwd())`](@ref)).
   By default, automatically discovers all `.jl` files in the test directory.
 - `init_code`: Code use to initialize each test's sandbox module (e.g., import auxiliary
   packages, define constants, etc).
@@ -642,17 +649,17 @@ Several keyword arguments are also supported:
 - `--verbose`: Print more detailed information during test execution
 - `--quickfail`: Stop the entire test run as soon as any test fails
 - `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory)
-- `TESTS...`: Filter tests by name, matched using `startswith`
+- `TESTS...`: Filter test files by name, matched using `startswith`
 
 ## Behavior
 
 - Automatically discovers all `.jl` files in the test directory (excluding `runtests.jl`)
-- Sorts tests by file size (largest first) for load balancing
+- Sorts test files by runtime (longest-running are started first) for load balancing
 - Launches worker processes with appropriate Julia flags for testing
 - Monitors memory usage and recycles workers that exceed memory limits
 - Provides real-time progress output with timing and memory statistics
 - Handles interruptions gracefully (Ctrl+C)
-- Returns nothing, but throws `Test.FallbackTestSetException` if any tests fail
+- Returns `nothing`, but throws `Test.FallbackTestSetException` if any tests fail
 
 ## Examples
 
