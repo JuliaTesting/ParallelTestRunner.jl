@@ -499,6 +499,21 @@ function find_tests(dir::String)
     return tests
 end
 
+"""
+    ParsedArgs
+
+Struct representing parsed command line arguments, to be passed to [`runtests`](@ref).
+`ParsedArgs` objects are typically obtained by using [`parse_args`](@ref).
+
+Fields are
+
+* `jobs::Union{Some{Int}, Nothing}`: the number of jobs
+* `verbose::Union{Some{Nothing}, Nothing}`: whether verbose printing was enabled
+* `quickfail::Union{Some{Nothing}, Nothing}`: whether quick fail was enabled
+* `list::Union{Some{Nothing}, Nothing}`: whether tests should be listed
+* `custom::Dict{String,Any}`: a dictionary of custom arguments
+* `positionals::Vector{String}`: the list of positional arguments passed on the command line, i.e. the explicit list of test files (to be matches with `startswith`)
+"""
 struct ParsedArgs
     jobs::Union{Some{Int}, Nothing}
     verbose::Union{Some{Nothing}, Nothing}
@@ -544,7 +559,7 @@ option was not specified, or `Some(optional_value=nothing)` when it was.
 
 Custom arguments can be specified via the `custom` keyword argument, which should be
 an array of strings representing custom flag names (without the `--` prefix). Presence
-of these flags will be recorded in the `custom` field of the returned `ParsedArgs` object.
+of these flags will be recorded in the `custom` field of the returned [`ParsedArgs`](@ref) object.
 """
 function parse_args(args; custom::Array{String} = String[])
     args = copy(args)
@@ -615,7 +630,7 @@ function filter_tests!(testsuite, args::ParsedArgs)
 end
 
 """
-    runtests(mod::Module, args::ParsedArgs;
+    runtests(mod::Module, args::Union{ParsedArgs,Array{String}};
              testsuite::Dict{String,Expr}=find_tests(pwd()),
              init_code = :(),
              test_worker = Returns(nothing),
@@ -628,14 +643,15 @@ Run Julia tests in parallel across multiple worker processes.
 ## Arguments
 
 - `mod`: The module calling runtests
-- `ARGS`: Command line arguments array, typically from `Base.ARGS`. When you run the tests
-  with `Pkg.test`, this can be changed with the `test_args` keyword argument. If the caller
-  needs to accept args too, consider using [`parse_args`](@ref) to parse the arguments first.
+- `ARGS`: Command line arguments.
+  This can be either the vector of strings of the arguments, typically from [`Base.ARGS`](https://docs.julialang.org/en/v1/base/constants/#Base.ARGS), or a [`ParsedArgs`](@ref) object, typically constructed with [`parse_args`](@ref).
+  When you run the tests with [`Pkg.test`](https://pkgdocs.julialang.org/v1/api/#Pkg.test), the command line arguments passed to the script can be changed with the `test_args` keyword argument.
+  If the caller needs to accept arguments too, consider using [`parse_args`](@ref) to parse the arguments first.
 
 Several keyword arguments are also supported:
 
 - `testsuite`: Dictionary mapping test names to expressions to execute (default: [`find_tests(pwd())`](@ref)).
-  By default, automatically discovers all `.jl` files in the test directory.
+  By default, automatically discovers all `.jl` files in the test directory and its subdirectories.
 - `init_code`: Code use to initialize each test's sandbox module (e.g., import auxiliary
   packages, define constants, etc).
 - `test_worker`: Optional function that takes a test name and returns a specific worker.
@@ -1160,6 +1176,6 @@ function runtests(mod::Module, args::ParsedArgs;
 
     return
 end
-runtests(mod::Module, ARGS; kwargs...) = runtests(mod, parse_args(ARGS); kwargs...)
+runtests(mod::Module, ARGS::Array{String}; kwargs...) = runtests(mod, parse_args(ARGS); kwargs...)
 
 end

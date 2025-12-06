@@ -81,7 +81,7 @@ julia --project test/runtests.jl --quickfail
 
 ### Using with Pkg.test
 
-You can also pass arguments through `Pkg.test`:
+You can also pass arguments through [`Pkg.test`](https://pkgdocs.julialang.org/v1/api/#Pkg.test):
 
 ```julia
 using Pkg
