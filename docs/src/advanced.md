@@ -1,3 +1,10 @@
+```@setup mypackage
+using ParallelTestRunner
+mypackage_dir = joinpath(pkgdir(ParallelTestRunner), "docs", "MyPackage")
+using MyPackage
+test_dir = joinpath(mypackage_dir, "test")
+```
+
 # Advanced Usage
 
 ```@meta
@@ -14,7 +21,10 @@ This page covers advanced features of `ParallelTestRunner` for customizing test 
 By default, [`runtests`](@ref) automatically discovers all `.jl` files in your `test/` directory (excluding `runtests.jl` itself) using the `find_tests` function.
 You can customize which tests to run by providing a custom `testsuite` dictionary:
 
-```julia
+```@example mypackage
+using ParallelTestRunner
+using MyPackage
+
 # Manually define your test suite
 testsuite = Dict(
     "basic" => quote
@@ -22,10 +32,13 @@ testsuite = Dict(
     end,
     "advanced" => quote
         include("advanced.jl")
+        @test 40 + 2 ≈ 42
     end
 )
 
-runtests(MyModule, ARGS; testsuite)
+cd(test_dir) do # hide
+runtests(MyPackage, ARGS; testsuite)
+end # hide
 ```
 
 ## Filtering Test Files
@@ -33,21 +46,26 @@ runtests(MyModule, ARGS; testsuite)
 You can also use [`find_tests`](@ref) to automatically discover test files and then filter or modify them.
 This requires manually parsing arguments so that filtering is only applied when the user did not request specific tests to run:
 
-```julia
+```@example mypackage
+using ParallelTestRunner
+using MyPackage
+
 # Start with autodiscovered tests
+cd(test_dir) do # hide
 testsuite = find_tests(pwd())
 
 # Parse arguments
 args = parse_args(ARGS)
 
 if filter_tests!(testsuite, args)
-    # Remove tests that shouldn't run on Windows
-    if Sys.iswindows()
-        delete!(testsuite, "ext/specialfunctions")
+    # Remove tests that shouldn't run on non-Windows systems
+    if !Sys.iswindows()
+        delete!(testsuite, "advanced")
     end
 end
 
-runtests(MyModule, args; testsuite)
+runtests(MyPackage, args; testsuite)
+end # hide
 ```
 
 The [`filter_tests!`](@ref) function returns `true` if no positional arguments were provided (allowing additional filtering) and `false` if the user specified specific tests (preventing further filtering).
@@ -60,20 +78,20 @@ This is useful for:
 - Defining constants, defaults or helper functions
 - Setting up test infrastructure
 
-```julia
+```@example mypackage
 using ParallelTestRunner
+using MyPackage
 
 const init_code = quote
-    using Test
-    using MyPackage
-
     # Define a helper function available to all tests
     function test_helper(x)
         return x * 2
     end
 end
 
+cd(test_dir) do # hide
 runtests(MyPackage, ARGS; init_code)
+end # hide
 ```
 
 The `init_code` is evaluated in each test's sandbox module, so all definitions are available to your test files.
@@ -82,8 +100,9 @@ The `init_code` is evaluated in each test's sandbox module, so all definitions a
 
 For tests that require specific environment variables or Julia flags, you can use the `test_worker` keyword argument to [`runtests`](@ref) to assign tests to custom workers:
 
-```julia
+```@example mypackage
 using ParallelTestRunner
+using MyPackage
 
 function test_worker(name)
     if name == "needs_env_var"
@@ -120,8 +139,9 @@ The `test_worker` function receives the test name and should return either:
 
 If your package needs to accept its own command-line arguments in addition to `ParallelTestRunner`'s options, use [`parse_args`](@ref) with custom flags:
 
-```julia
+```@example mypackage
 using ParallelTestRunner
+using MyPackage
 
 # Parse arguments with custom flags
 args = parse_args(ARGS; custom=["myflag", "another-flag"])
@@ -132,10 +152,12 @@ if args.custom["myflag"] !== nothing
 end
 
 # Pass parsed args to runtests
+cd(test_dir) do # hide
 runtests(MyPackage, args)
+end # hide
 ```
 
-Custom flags are stored in the `custom` field of the `ParsedArgs` object, with values of `nothing` (not set) or `Some(value)` (set, with optional value).
+Custom flags are stored in the `custom` field of the [`ParsedArgs`](@ref) object, with values of `nothing` (not set) or `Some(value)` (set, with optional value).
 
 ## Interactive use
 
@@ -146,11 +168,11 @@ For example, here is how we could run the subset of test files that start with t
 # Start julia in an environment where `MyPackage.jl` is available
 julia --project
 ```
-```julia-repl
-julia> using Pkg
+```@repl mypackage
+using Pkg
 
 # No need to start a fresh session to change threading
-julia> Pkg.test("MyModule"; test_args=`--verbose test_cool_feature`, julia_args=`--threads=auto`);
+Pkg.test("MyPackage"; test_args=`--verbose advanced`, julia_args=`--threads=auto`);
 ```
 
 Alternatively, arguments can be passed directly from the command line with a shell alias like the one below:
