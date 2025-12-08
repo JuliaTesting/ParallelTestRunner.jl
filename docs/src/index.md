@@ -9,9 +9,8 @@ end
 
 ```@setup mypackage
 using ParallelTestRunner
-mypackage_dir = joinpath(pkgdir(ParallelTestRunner), "docs", "MyPackage")
 using MyPackage
-test_dir = joinpath(mypackage_dir, "test")
+test_dir = joinpath(pkgdir(ParallelTestRunner), "docs", "MyPackage", "test")
 ```
 
 [ParallelTestRunner.jl](https://github.com/JuliaTesting/ParallelTestRunner.jl) is a simple parallel test runner for Julia tests with automatic test discovery.
