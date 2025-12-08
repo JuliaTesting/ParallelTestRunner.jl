@@ -43,13 +43,15 @@ jobs:
         with:
           cache-name: Documentation
       - name: Instantiate docs environment
-        shell: julia --color=yes --project=docs {0}
+        # Use `--check-bounds=yes` so that when we run tests we don't need to
+        # precompile again all the packages.
+        shell: julia --color=yes --check-bounds=yes --project=docs {0}
         run: |
           using Pkg
           Pkg.instantiate()
       - name: Build documentation
         run:
-          julia --color=yes --project=docs docs/make.jl
+          julia --color=yes --project=docs --check-bounds=yes docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Save Julia depot cache on cancel or failure
@@ -94,7 +96,7 @@ jobs:
           name: documentation-build
           path: docs/build
       - name: Instantiate docs environment
-        shell: julia --color=yes {0}
+        shell: julia --color=yes --check-bounds=yes {0}
         run: |
           # We only need `Documenter` for publishing the docs, let's not
           # reinstall the world all over again.
@@ -102,7 +104,7 @@ jobs:
           Pkg.add(; name="Documenter", version="1")
       - name: Deploy documentation
         run:
-          julia --color=yes docs/deploy.jl
+          julia --color=yes --check-bounds=yes docs/deploy.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
