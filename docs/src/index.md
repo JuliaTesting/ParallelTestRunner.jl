@@ -7,6 +7,12 @@ DocTestSetup = quote
 end
 ```
 
+```@setup mypackage
+using ParallelTestRunner
+using MyPackage
+test_dir = joinpath(pkgdir(ParallelTestRunner), "docs", "MyPackage", "test")
+```
+
 [ParallelTestRunner.jl](https://github.com/JuliaTesting/ParallelTestRunner.jl) is a simple parallel test runner for Julia tests with automatic test discovery.
 It runs each test file concurrently in isolated worker processes, providing real-time progress output and efficient resource management.
 
@@ -19,11 +25,13 @@ It runs each test file concurrently in isolated worker processes, providing real
 
 2. **Update your `test/runtests.jl`**:
 
-   ```julia
+   ```@example mypackage
    using MyPackage
    using ParallelTestRunner
 
+   cd(test_dir) do # hide
    runtests(MyPackage, ARGS)
+   end # hide
    ```
 
 That's it! `ParallelTestRunner` will automatically:
@@ -107,14 +115,6 @@ The test runner provides real-time output showing:
 - GC time and percentage
 - Memory allocation
 - RSS (Resident Set Size) memory usage
-
-Example output:
-
-```
-Test                    | Time (s) |  GC (s) | GC % | Alloc (MB) | RSS (MB) |
-basic               (1) |    0.12  |   0.01  |  8.3 |     5.23   |  125.45  |
-integration         (2) |    2.45  |   0.15  |  6.1 |    45.67   |  234.12  |
-```
 
 ### Graceful Interruption
 

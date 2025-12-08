@@ -1,12 +1,12 @@
+name = "MyPackage"
+uuid = "0b48ad8b-a282-4514-80d9-bf0add6b76ed"
+
 [deps]
-Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
-MyPackage = "0b48ad8b-a282-4514-80d9-bf0add6b76ed"
 ParallelTestRunner = "d3525ed8-44d0-4b2c-a655-542cee43accc"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
-MyPackage = {path = "MyPackage"}
 ParallelTestRunner = {path = ".."}
 
 [compat]
-Documenter = "1"
+julia = "1.10"

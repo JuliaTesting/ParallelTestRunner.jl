@@ -679,29 +679,49 @@ Several keyword arguments are also supported:
 
 ## Examples
 
+Run all tests with default settings (auto-discovers `.jl` files)
+
 ```julia
-# Run all tests with default settings (auto-discovers .jl files)
-runtests(MyModule, ARGS)
+using ParallelTestRunner
+using MyPackage
 
-# Run only tests matching "integration"
-runtests(MyModule, ["integration"])
+runtests(MyPackage, ARGS)
+```
 
-# Define a custom test suite
+Run only tests matching "integration" (matched with `startswith`):
+```julia
+using ParallelTestRunner
+using MyPackage
+
+runtests(MyPackage, ["integration"])
+```
+
+Define a custom test suite
+```julia
+using ParallelTestRunner
+using MyPackage
+
 testsuite = Dict(
     "custom" => quote
         @test 1 + 1 == 2
     end
 )
-runtests(MyModule, ARGS; testsuite)
 
-# Customize the test suite
+runtests(MyPackage, ARGS; testsuite)
+```
+
+Customize the test suite
+```julia
+using ParallelTestRunner
+using MyPackage
+
 testsuite = find_tests(pwd())
 args = parse_args(ARGS)
 if filter_tests!(testsuite, args)
     # Remove a specific test
     delete!(testsuite, "slow_test")
 end
-runtests(MyModule, args; testsuite)
+runtests(MyPackage, args; testsuite)
 ```
 
 ## Memory Management
