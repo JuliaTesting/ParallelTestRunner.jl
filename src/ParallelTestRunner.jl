@@ -399,7 +399,7 @@ function save_test_history(mod::Module, history::Dict{String, Float64})
     end
 end
 
-function test_exe()
+function test_exe(color::Bool=false)
     test_exeflags = Base.julia_cmd()
     filter!(test_exeflags.exec) do c
         !(startswith(c, "--depwarn") || startswith(c, "--check-bounds"))
@@ -408,6 +408,7 @@ function test_exe()
     push!(test_exeflags.exec, "--startup-file=no")
     push!(test_exeflags.exec, "--depwarn=yes")
     push!(test_exeflags.exec, "--project=$(Base.active_project())")
+    push!(test_exeflags.exec, "--color=$(color ? "yes" : "no")")
     return test_exeflags
 end
 
@@ -446,7 +447,7 @@ function addworker(;
         exeflags = nothing,
         color::Bool = false,
     )
-    exe = test_exe()
+    exe = test_exe(color)
     if exename === nothing
         exename = exe[1]
     end
@@ -460,7 +461,7 @@ function addworker(;
     # Malt already sets OPENBLAS_NUM_THREADS to 1
     push!(env, "OPENBLAS_NUM_THREADS" => "1")
 
-    io = IOContext(IOBuffer(), :color => color)
+    io = IOBuffer()
     wrkr = Malt.Worker(; exename, exeflags, env, stdio_loop, stdout=io, stderr=io)
     WORKER_IDS[wrkr.proc_pid] = length(WORKER_IDS) + 1
     return wrkr
@@ -999,7 +1000,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     ex
                 end
                 test_t1 = time()
-                output = String(take!(wrkr.collected_stdout.io))
+                output = String(take!(wrkr.collected_stdout))
                 push!(results, (test, result, output, test_t0, test_t1))
 
                 # act on the results
