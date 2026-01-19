@@ -25,3 +25,6 @@ Serialization = "1"
 Statistics = "1"
 Test = "1"
 julia = "1.10"
+
+[sources]
+Malt = {url = "https://github.com/giordano/Malt.jl.git", rev = "mg/worker-stdout-stderr"}
