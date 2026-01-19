@@ -256,7 +256,7 @@ function Test.finish(ts::WorkerTestSet)
     return ts.wrapped_ts
 end
 
-function runtest(f, name, init_code, color)
+function runtest(f, name, init_code)
     function inner()
         # generate a temporary module to execute the tests in
         mod = @eval(Main, module $(gensym(name)) end)
@@ -442,7 +442,9 @@ To add multiple workers, use [`addworkers`](@ref).
 """
 function addworker(;
         env = Vector{Pair{String, String}}(),
-        exename = nothing, exeflags = nothing
+        exename = nothing,
+        exeflags = nothing,
+        color::Bool = false,
     )
     exe = test_exe()
     if exename === nothing
@@ -458,7 +460,7 @@ function addworker(;
     # Malt already sets OPENBLAS_NUM_THREADS to 1
     push!(env, "OPENBLAS_NUM_THREADS" => "1")
 
-    io = IOBuffer()
+    io = IOContext(IOBuffer(), :color => color)
     wrkr = Malt.Worker(; exename, exeflags, env, stdio_loop, stdout=io, stderr=io)
     WORKER_IDS[wrkr.proc_pid] = length(WORKER_IDS) + 1
     return wrkr
@@ -978,7 +980,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     wrkr = p
                 end
                 if wrkr === nothing || !Malt.isrunning(wrkr)
-                    wrkr = p = addworker()
+                    wrkr = p = addworker(; io_ctx.color)
                 end
 
                 # run the test
@@ -986,7 +988,7 @@ function runtests(mod::Module, args::ParsedArgs;
                 result = try
                     Malt.remote_eval_wait(Main, wrkr, :(import ParallelTestRunner))
                     Malt.remote_call_fetch(invokelatest, wrkr, runtest,
-                                           testsuite[test], test, init_code, io_ctx.color)
+                                           testsuite[test], test, init_code)
                 catch ex
                     if isa(ex, InterruptException)
                         # the worker got interrupted, signal other tasks to stop
@@ -997,7 +999,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     ex
                 end
                 test_t1 = time()
-                output = String(take!(wrkr.collected_stdout))
+                output = String(take!(wrkr.collected_stdout.io))
                 push!(results, (test, result, output, test_t0, test_t1))
 
                 # act on the results
