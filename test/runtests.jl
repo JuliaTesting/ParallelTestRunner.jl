@@ -209,9 +209,10 @@ end
 end
 
 @testset "test output" begin
+    msg = "This is some output from the test"
     testsuite = Dict(
         "output" => quote
-            println("This is some output from the test")
+            println($(msg))
         end
     )
 
@@ -220,7 +221,33 @@ end
 
     str = String(take!(io))
     @test contains(str, r"output .+ started at")
-    @test contains(str, r"This is some output from the test")
+    @test contains(str, msg)
+    @test contains(str, "SUCCESS")
+
+    msg2 = "More output"
+    testsuite = Dict(
+        "verbose-1" => quote
+            print($(msg))
+        end,
+        "verbose-2" => quote
+            println($(msg2))
+        end,
+        "silent" => quote
+            @test true
+        end,
+    )
+    io = IOBuffer()
+    # Run all tests on the same worker, makre sure all the output is captured
+    # and attributed to the correct test set.
+    runtests(ParallelTestRunner, ["--verbose", "--jobs=1"]; testsuite, stdout=io, stderr=io)
+
+    str = String(take!(io))
+    @test contains(str, r"verbose-1 .+ started at")
+    @test contains(str, r"verbose-2 .+ started at")
+    @test contains(str, r"silent .+ started at")
+    @test contains(str, "Output generated during execution of 'verbose-1':\n[ $(msg)")
+    @test contains(str, "Output generated during execution of 'verbose-2':\n[ $(msg2)")
+    @test !contains(str, "Output generated during execution of 'silent':")
     @test contains(str, "SUCCESS")
 end
 
