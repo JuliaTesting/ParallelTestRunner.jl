@@ -204,8 +204,8 @@ end
 function stdio_loop(worker::Malt.Worker)
     @async while isopen(worker.stdout_pipe) && Malt.isrunning(worker)
         try
-            bytes = readline(worker.stdout_pipe)
-            write(worker.collected_stdout, bytes, '\n')
+            bytes = readavailable(worker.stdout_pipe)
+            write(worker.collected_stdout, bytes)
             flush(worker.collected_stdout)
         catch
             break
@@ -213,8 +213,8 @@ function stdio_loop(worker::Malt.Worker)
     end
     @async while isopen(worker.stderr_pipe) && Malt.isrunning(worker)
         try
-            bytes = readline(worker.stderr_pipe)
-            write(worker.collected_stderr, bytes, '\n')
+            bytes = readavailable(worker.stderr_pipe)
+            write(worker.collected_stderr, bytes)
             flush(worker.collected_stderr)
         catch
             break

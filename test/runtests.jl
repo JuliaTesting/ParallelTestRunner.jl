@@ -244,7 +244,6 @@ end
     testsuite = Dict(
         "color" => quote
             printstyled("Roses Are Red"; color=:red)
-            println()
         end
     )
     io = IOBuffer()
@@ -258,7 +257,6 @@ end
         "no color" => quote
             print("Violets are ")
             printstyled("blue"; color=:blue)
-            println()
         end
     )
     io = IOBuffer()
