@@ -27,4 +27,4 @@ Test = "1"
 julia = "1.10"
 
 [sources]
-Malt = {url = "https://github.com/giordano/Malt.jl.git", rev = "mg/worker-stdout-stderr"}
+Malt = {url = "https://github.com/giordano/Malt.jl.git", rev = "374af847634b8faa448d575334c78464b3094765"}
