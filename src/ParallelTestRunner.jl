@@ -23,6 +23,14 @@ function anynonpass(ts::Test.AbstractTestSet)
     end
 end
 
+# Thin wrapper around Malt.Worker, to handle the stdio loop differently.
+struct PTRWorker <: Malt.AbstractWorker
+    w::Malt.Worker
+    io::IOBuffer
+end
+Malt.isrunning(wrkr::PTRWorker) = Malt.isrunning(wrkr.w)
+Malt.stop(wrkr::PTRWorker) = Malt.stop(wrkr.w)
+
 #Always set the max rss so that if tests add large global variables (which they do) we don't make the GC's life too hard
 if Sys.WORD_SIZE == 64
     const JULIA_TEST_MAXRSS_MB = 3800
@@ -201,19 +209,19 @@ function print_test_crashed(wrkr, test, ctx::TestIOContext)
 end
 
 # Adapted from `Malt._stdio_loop`
-function stdio_loop(worker::Malt.Worker)
-    @async while !eof(worker.stdout_pipe) && Malt.isrunning(worker)
+function stdio_loop(worker::PTRWorker)
+    @async while !eof(worker.w.stdout) && Malt.isrunning(worker)
         try
-            bytes = readavailable(worker.stdout_pipe)
-            write(worker.collected_stdout, bytes)
+            bytes = readavailable(worker.w.stdout)
+            write(worker.io, bytes)
         catch
             break
         end
     end
-    @async while !eof(worker.stderr_pipe) && Malt.isrunning(worker)
+    @async while !eof(worker.w.stderr) && Malt.isrunning(worker)
         try
-            bytes = readavailable(worker.stderr_pipe)
-            write(worker.collected_stderr, bytes)
+            bytes = readavailable(worker.w.stderr)
+            write(worker.io, bytes)
         catch
             break
         end
@@ -413,7 +421,7 @@ end
 # Map PIDs to logical worker IDs
 # Malt doesn't have a global worker ID, and PID make printing ugly
 const WORKER_IDS = Dict{Int32, Int32}()
-worker_id(wrkr) = WORKER_IDS[wrkr.proc_pid]
+worker_id(wrkr) = WORKER_IDS[wrkr.w.proc_pid]
 
 """
     addworkers(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing)
@@ -460,8 +468,9 @@ function addworker(;
     push!(env, "OPENBLAS_NUM_THREADS" => "1")
 
     io = IOBuffer()
-    wrkr = Malt.Worker(; exename, exeflags, env, stdio_loop, stdout=io, stderr=io)
-    WORKER_IDS[wrkr.proc_pid] = length(WORKER_IDS) + 1
+    wrkr = PTRWorker(Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false), io)
+    stdio_loop(wrkr)
+    WORKER_IDS[wrkr.w.proc_pid] = length(WORKER_IDS) + 1
     return wrkr
 end
 
@@ -985,8 +994,8 @@ function runtests(mod::Module, args::ParsedArgs;
                 # run the test
                 put!(printer_channel, (:started, test, worker_id(wrkr)))
                 result = try
-                    Malt.remote_eval_wait(Main, wrkr, :(import ParallelTestRunner))
-                    Malt.remote_call_fetch(invokelatest, wrkr, runtest,
+                    Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
+                    Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
                                            testsuite[test], test, init_code)
                 catch ex
                     if isa(ex, InterruptException)
@@ -998,7 +1007,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     ex
                 end
                 test_t1 = time()
-                output = String(take!(wrkr.collected_stdout))
+                output = String(take!(wrkr.io))
                 push!(results, (test, result, output, test_t0, test_t1))
 
                 # act on the results
