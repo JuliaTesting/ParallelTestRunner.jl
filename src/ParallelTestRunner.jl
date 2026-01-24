@@ -424,7 +424,7 @@ const WORKER_IDS = Dict{Int32, Int32}()
 worker_id(wrkr) = WORKER_IDS[wrkr.w.proc_pid]
 
 """
-    addworkers(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing)
+    addworkers(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing, color::Bool=false)
 
 Add `X` worker processes.
 To add a single worker, use [`addworker`](@ref).
@@ -433,11 +433,12 @@ To add a single worker, use [`addworker`](@ref).
 - `env`: Vector of environment variable pairs to set for the worker process.
 - `exename`: Custom executable to use for the worker process.
 - `exeflags`: Custom flags to pass to the worker process.
+- `color`: Boolean flag to decide whether to start `julia` with `--color=yes` (if `true`) or `--color=no` (if `false`).
 """
 addworkers(X; kwargs...) = [addworker(; kwargs...) for _ in 1:X]
 
 """
-    addworker(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing)
+    addworker(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing; color::Bool=false)
 
 Add a single worker process. 
 To add multiple workers, use [`addworkers`](@ref).
@@ -446,6 +447,7 @@ To add multiple workers, use [`addworkers`](@ref).
 - `env`: Vector of environment variable pairs to set for the worker process.
 - `exename`: Custom executable to use for the worker process.
 - `exeflags`: Custom flags to pass to the worker process.
+- `color`: Boolean flag to decide whether to start `julia` with `--color=yes` (if `true`) or `--color=no` (if `false`).
 """
 function addworker(;
         env = Vector{Pair{String, String}}(),
