@@ -24,6 +24,17 @@ cd(@__DIR__)
     @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
 end
 
+@testset "debug timing" begin
+    io = IOBuffer()
+    io_color = IOContext(io, :color => true)
+    runtests(ParallelTestRunner, ["--debug-timing"]; stdout=io_color, stderr=io_color)
+    str = String(take!(io))
+
+    @test contains(str, "Init") # debug timing
+    @test contains(str, "time (s)") # debug timing
+    @test contains(str, "Time (s)") # normal timing
+end
+
 @testset "subdir use" begin
     d = @__DIR__
     testsuite = find_tests(d)
