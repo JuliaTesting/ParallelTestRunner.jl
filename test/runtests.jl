@@ -26,6 +26,17 @@ include(joinpath(@__DIR__, "utils.jl"))
     @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
 end
 
+@testset "debug timing" begin
+    io = IOBuffer()
+    io_color = IOContext(io, :color => true)
+    runtests(ParallelTestRunner, ["--debug-timing"]; stdout=io_color, stderr=io_color)
+    str = String(take!(io))
+
+    @test contains(str, "Init") # debug timing
+    @test contains(str, "time (s)") # debug timing
+    @test contains(str, "Time (s)") # normal timing
+end
+
 @testset "default njobs" begin
     @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 28) == 1
     @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 30) == 1
