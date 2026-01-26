@@ -218,7 +218,7 @@ end
 
 # Adapted from `Malt._stdio_loop`
 function stdio_loop(worker::Malt.Worker, io)
-    @async while !eof(worker.stdout) && Malt.isrunning(worker)
+    Threads.@spawn while !eof(worker.stdout) && Malt.isrunning(worker)
         try
             bytes = readavailable(worker.stdout)
             write(io, bytes)
@@ -226,7 +226,7 @@ function stdio_loop(worker::Malt.Worker, io)
             break
         end
     end
-    @async while !eof(worker.stderr) && Malt.isrunning(worker)
+    Threads.@spawn while !eof(worker.stderr) && Malt.isrunning(worker)
         try
             bytes = readavailable(worker.stderr)
             write(io, bytes)
