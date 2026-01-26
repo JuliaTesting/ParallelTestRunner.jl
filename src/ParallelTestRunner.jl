@@ -23,19 +23,24 @@ function anynonpass(ts::Test.AbstractTestSet)
     end
 end
 
+const ID_COUNTER = Threads.Atomic{Int}(0)
+
 # Thin wrapper around Malt.Worker, to handle the stdio loop differently.
 struct PTRWorker <: Malt.AbstractWorker
     w::Malt.Worker
     io::IOBuffer
+    id::Int
 end
 
 function PTRWorker(; exename=Base.julia_cmd()[1], exeflags=String[], env=String[])
     io = IOBuffer()
     wrkr = Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false)
     stdio_loop(wrkr, io)
-    return PTRWorker(wrkr, io)
+    id = ID_COUNTER[] += 1
+    return PTRWorker(wrkr, io, id)
 end
 
+worker_id(wrkr::PTRWorker) = wrkr.id
 Malt.isrunning(wrkr::PTRWorker) = Malt.isrunning(wrkr.w)
 Malt.stop(wrkr::PTRWorker) = Malt.stop(wrkr.w)
 
@@ -426,11 +431,6 @@ function test_exe(color::Bool=false)
     return test_exeflags
 end
 
-# Map PIDs to logical worker IDs
-# Malt doesn't have a global worker ID, and PID make printing ugly
-const WORKER_IDS = Dict{Int32, Int32}()
-worker_id(wrkr) = WORKER_IDS[wrkr.w.proc_pid]
-
 """
     addworkers(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing, color::Bool=false)
 
@@ -476,9 +476,7 @@ function addworker(;
     push!(env, "JULIA_NUM_THREADS" => "1")
     # Malt already sets OPENBLAS_NUM_THREADS to 1
     push!(env, "OPENBLAS_NUM_THREADS" => "1")
-    wrkr = PTRWorker(; exename, exeflags, env)
-    WORKER_IDS[wrkr.w.proc_pid] = length(WORKER_IDS) + 1
-    return wrkr
+    return PTRWorker(; exename, exeflags, env)
 end
 
 """
