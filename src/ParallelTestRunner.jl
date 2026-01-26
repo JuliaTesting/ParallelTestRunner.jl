@@ -28,6 +28,14 @@ struct PTRWorker <: Malt.AbstractWorker
     w::Malt.Worker
     io::IOBuffer
 end
+
+function PTRWorker(; exename=Base.julia_cmd()[1], exeflags=String[], env=String[])
+    io = IOBuffer()
+    wrkr = Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false)
+    stdio_loop(wrkr, io)
+    return PTRWorker(wrkr, io)
+end
+
 Malt.isrunning(wrkr::PTRWorker) = Malt.isrunning(wrkr.w)
 Malt.stop(wrkr::PTRWorker) = Malt.stop(wrkr.w)
 
@@ -209,19 +217,19 @@ function print_test_crashed(wrkr, test, ctx::TestIOContext)
 end
 
 # Adapted from `Malt._stdio_loop`
-function stdio_loop(worker::PTRWorker)
-    @async while !eof(worker.w.stdout) && Malt.isrunning(worker)
+function stdio_loop(worker::Malt.Worker, io)
+    @async while !eof(worker.stdout) && Malt.isrunning(worker)
         try
-            bytes = readavailable(worker.w.stdout)
-            write(worker.io, bytes)
+            bytes = readavailable(worker.stdout)
+            write(io, bytes)
         catch
             break
         end
     end
-    @async while !eof(worker.w.stderr) && Malt.isrunning(worker)
+    @async while !eof(worker.stderr) && Malt.isrunning(worker)
         try
-            bytes = readavailable(worker.w.stderr)
-            write(worker.io, bytes)
+            bytes = readavailable(worker.stderr)
+            write(io, bytes)
         catch
             break
         end
@@ -468,10 +476,7 @@ function addworker(;
     push!(env, "JULIA_NUM_THREADS" => "1")
     # Malt already sets OPENBLAS_NUM_THREADS to 1
     push!(env, "OPENBLAS_NUM_THREADS" => "1")
-
-    io = IOBuffer()
-    wrkr = PTRWorker(Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false), io)
-    stdio_loop(wrkr)
+    wrkr = PTRWorker(; exename, exeflags, env)
     WORKER_IDS[wrkr.w.proc_pid] = length(WORKER_IDS) + 1
     return wrkr
 end
