@@ -432,13 +432,14 @@ function test_exe(color::Bool=false)
 end
 
 """
-    addworkers(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing, color::Bool=false)
+    addworkers(; env=Vector{Pair{String, String}}(), init_worker_code = :(), exename=nothing, exeflags=nothing, color::Bool=false)
 
 Add `X` worker processes.
 To add a single worker, use [`addworker`](@ref).
 
 ## Arguments
 - `env`: Vector of environment variable pairs to set for the worker process.
+- `init_worker_code`: Code use to initialize each worker. This is run only once per worker instead of once per test.
 - `exename`: Custom executable to use for the worker process.
 - `exeflags`: Custom flags to pass to the worker process.
 - `color`: Boolean flag to decide whether to start `julia` with `--color=yes` (if `true`) or `--color=no` (if `false`).
@@ -446,19 +447,22 @@ To add a single worker, use [`addworker`](@ref).
 addworkers(X; kwargs...) = [addworker(; kwargs...) for _ in 1:X]
 
 """
-    addworker(; env=Vector{Pair{String, String}}(), exename=nothing, exeflags=nothing; color::Bool=false)
+    addworker(; env=Vector{Pair{String, String}}(), init_worker_code = :(), exename=nothing, exeflags=nothing; color::Bool=false)
 
 Add a single worker process. 
 To add multiple workers, use [`addworkers`](@ref).
 
 ## Arguments
 - `env`: Vector of environment variable pairs to set for the worker process.
+- `init_code`: Code use to initialize each worker. This should be used for imports and definitions shared amongst all workers
+- `init_worker_code`: Code use to initialize each worker. This is run only once per worker instead of once per test.
 - `exename`: Custom executable to use for the worker process.
 - `exeflags`: Custom flags to pass to the worker process.
 - `color`: Boolean flag to decide whether to start `julia` with `--color=yes` (if `true`) or `--color=no` (if `false`).
 """
 function addworker(;
         env = Vector{Pair{String, String}}(),
+        init_worker_code = :(),
         exename = nothing,
         exeflags = nothing,
         color::Bool = false,
@@ -476,7 +480,11 @@ function addworker(;
     push!(env, "JULIA_NUM_THREADS" => "1")
     # Malt already sets OPENBLAS_NUM_THREADS to 1
     push!(env, "OPENBLAS_NUM_THREADS" => "1")
-    return PTRWorker(; exename, exeflags, env)
+    wrkr =  PTRWorker(; exename, exeflags, env)
+    if init_worker_code != :()
+        Malt.remote_eval_wait(Main, wrkr.w, init_worker_code)
+    end
+    return wrkr
 end
 
 """
@@ -655,6 +663,7 @@ end
 """
     runtests(mod::Module, args::Union{ParsedArgs,Array{String}};
              testsuite::Dict{String,Expr}=find_tests(pwd()),
+             init_worker_code = :(),
              init_code = :(),
              test_worker = Returns(nothing),
              stdout = Base.stdout,
@@ -677,6 +686,7 @@ Several keyword arguments are also supported:
   By default, automatically discovers all `.jl` files in the test directory and its subdirectories.
 - `init_code`: Code use to initialize each test's sandbox module (e.g., import auxiliary
   packages, define constants, etc).
+- `init_worker_code`: Code use to initialize each worker. This is run only once per worker instead of once per test.
 - `test_worker`: Optional function that takes a test name and returns a specific worker.
   When returning `nothing`, the test will be assigned to any available default worker.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
@@ -754,7 +764,7 @@ issues during long test runs. The memory limit is set based on system architectu
 """
 function runtests(mod::Module, args::ParsedArgs;
                   testsuite::Dict{String,Expr} = find_tests(pwd()),
-                  init_code = :(), test_worker = Returns(nothing),
+                  init_code = :(), init_worker_code = :(), test_worker = Returns(nothing),
                   stdout = Base.stdout, stderr = Base.stderr)
     #
     # set-up
@@ -993,7 +1003,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     wrkr = p
                 end
                 if wrkr === nothing || !Malt.isrunning(wrkr)
-                    wrkr = p = addworker(; io_ctx.color)
+                    wrkr = p = addworker(; init_worker_code, io_ctx.color)
                 end
 
                 # run the test
