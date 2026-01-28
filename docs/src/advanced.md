@@ -95,6 +95,34 @@ end # hide
 
 The `init_code` is evaluated in each test's sandbox module, so all definitions are available to your test files.
 
+## Worker Initialization
+
+For setting up a worker with common dependencies, you can use the `init_worker_code` keyword argument to [`runtests`](@ref).
+This is useful for loading code that takes longer to load that every test will need.
+
+```@example mypackage
+using ParallelTestRunner
+using MyPackage
+
+const init_worker_code = quote
+    # Define a helper function at worker creation
+    function common_test_helper(x)
+        return x * 2
+    end
+end
+
+const init_code = quote
+    # Import the previously-defined test function
+    #  into the temporary test module
+    import Main: common_test_helper
+end
+
+cd(test_dir) do # hide
+runtests(MyPackage, ARGS; init_worker_code, init_code)
+end # hide
+```
+The `init_worker_code` is evaluated once per worker, so all definitions can be imported for use by the test module.
+
 ## Custom Workers
 
 For tests that require specific environment variables or Julia flags, you can use the `test_worker` keyword argument to [`runtests`](@ref) to assign tests to custom workers:
@@ -200,7 +228,7 @@ function jltest {
 
 1. **Keep tests isolated**: Each test file runs in its own module, so avoid relying on global state between tests.
 
-1. **Use `init_code` for common setup**: Instead of duplicating setup code in each test file, use `init_code` to share common initialization.
+1. **Use `init_code` for common setup**: Instead of duplicating setup code in each test file, use `init_code` to share common initialization. For long-running initialization, consider using `init_worker_code` so that it is run only once per worker creation instead of before each test.
 
 1. **Filter tests appropriately**: Use [`filter_tests!`](@ref) to respect user-specified test filters while allowing additional programmatic filtering.
 
