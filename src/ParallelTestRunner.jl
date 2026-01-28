@@ -449,12 +449,11 @@ addworkers(X; kwargs...) = [addworker(; kwargs...) for _ in 1:X]
 """
     addworker(; env=Vector{Pair{String, String}}(), init_worker_code = :(), exename=nothing, exeflags=nothing; color::Bool=false)
 
-Add a single worker process. 
+Add a single worker process.
 To add multiple workers, use [`addworkers`](@ref).
 
 ## Arguments
 - `env`: Vector of environment variable pairs to set for the worker process.
-- `init_code`: Code use to initialize each worker. This should be used for imports and definitions shared amongst all workers
 - `init_worker_code`: Code use to initialize each worker. This is run only once per worker instead of once per test.
 - `exename`: Custom executable to use for the worker process.
 - `exeflags`: Custom flags to pass to the worker process.
@@ -663,8 +662,8 @@ end
 """
     runtests(mod::Module, args::Union{ParsedArgs,Array{String}};
              testsuite::Dict{String,Expr}=find_tests(pwd()),
-             init_worker_code = :(),
              init_code = :(),
+             init_worker_code = :(),
              test_worker = Returns(nothing),
              stdout = Base.stdout,
              stderr = Base.stderr)
