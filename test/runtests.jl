@@ -71,6 +71,34 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "init worker code" begin
+    init_worker_code = quote
+        using Test
+        import Main: should_be_defined, @should_also_be_defined
+    end
+    init_code = quote
+        using Test
+        should_be_defined() = true
+
+        macro should_also_be_defined()
+            return :(true)
+        end
+    end
+    testsuite = Dict(
+        "custom" => quote
+            @test should_be_defined()
+            @test @should_also_be_defined()
+        end
+    )
+
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--verbose"]; init_code, init_worker_code, testsuite, stdout=io, stderr=io)
+
+    str = String(take!(io))
+    @test contains(str, r"custom .+ started at")
+    @test contains(str, "SUCCESS")
+end
+
 @testset "custom worker" begin
     function test_worker(name)
         if name == "needs env var"
