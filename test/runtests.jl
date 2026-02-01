@@ -73,17 +73,17 @@ end
 
 @testset "init worker code" begin
     init_worker_code = quote
-        using Test
-        import Main: should_be_defined, @should_also_be_defined
-    end
-    init_code = quote
-        using Test
         should_be_defined() = true
 
         macro should_also_be_defined()
             return :(true)
         end
     end
+    init_code = quote
+        using Test
+        using Main: should_be_defined, @should_also_be_defined
+    end
+
     testsuite = Dict(
         "custom" => quote
             @test should_be_defined()

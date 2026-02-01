@@ -97,24 +97,28 @@ The `init_code` is evaluated in each test's sandbox module, so all definitions a
 
 ## Worker Initialization
 
-For setting up a worker with common dependencies, you can use the `init_worker_code` keyword argument to [`runtests`](@ref).
-This is useful for loading code that takes longer to load that every test will need.
+For most situations, `init_code` described above should be used. However, if the common code takes so long to import that it makes a notable difference to run before every testset, you can use the `init_worker_code` keyword argument in [`runtests`](@ref) to have it run only once at worker initialization. However, you will also have to import the directly-used functionality in your testset module using `init_code` due to the way ParallelTestRunner.jl creates a temporary module for each testset.
+
+The example below is trivial and `init_worker_code` would not be necessary if this were used in a package, but it shows how it should be used. A real use-case of this is for tests using the GPUArrays.jl test suite; including it takes about 3s, so that 3s running before every testset can add a significant amount of runtime to the various GPU backend testsuites as opposed to running once when the runner is initally created.
 
 ```@example mypackage
 using ParallelTestRunner
 using MyPackage
 
 const init_worker_code = quote
-    # Define a helper function at worker creation
-    function common_test_helper(x)
+    # Common code that's slow to import
+    function complex_common_test_helper(x)
         return x * 2
     end
 end
 
 const init_code = quote
-    # Import the previously-defined test function
-    #  into the temporary test module
-    import Main: common_test_helper
+    # ParallelTestRunner creates a temporary module to run
+    #  each testset. `init_code` runs in this temporary module,
+    #  but code from `init_worker_code` that will be directly
+    #  called in a testset must be explicitly included in the
+    #  module namespace.
+    using Main: complex_common_test_helper
 end
 
 cd(test_dir) do # hide
