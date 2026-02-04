@@ -118,7 +118,7 @@ const init_code = quote
     #  but code from `init_worker_code` that will be directly
     #  called in a testset must be explicitly included in the
     #  module namespace.
-    using Main: complex_common_test_helper
+    import ..complex_common_test_helper
 end
 
 cd(test_dir) do # hide
