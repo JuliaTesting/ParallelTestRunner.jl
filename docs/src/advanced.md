@@ -166,6 +166,11 @@ The `test_worker` function receives the test name and should return either:
 - A worker object (from [`addworker`](@ref)) for tests that need special configuration
 - `nothing` to use the default worker pool
 
+!!! note
+    If your test suite uses both a `test_worker` function and `init_worker_code` as described in a prior section,
+    `test_worker` must also take in `init_worker_code` as a second argument. You are responsible for passing it to
+    [`addworker`](@ref) if your `init_code` depends on any `init_worker_code` definitions.
+
 ## Custom Arguments
 
 If your package needs to accept its own command-line arguments in addition to `ParallelTestRunner`'s options, use [`parse_args`](@ref) with custom flags:

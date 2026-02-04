@@ -134,6 +134,52 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "custom worker with `init_worker_code`" begin
+    init_worker_code = quote
+        should_be_defined() = true
+    end
+    init_code = quote
+        using Test
+        import ..should_be_defined
+    end
+    function test_worker(name, init_worker_code)
+        if name == "needs env var"
+            return addworker(env = ["SPECIAL_ENV_VAR" => "42"]; init_worker_code)
+        elseif name == "threads/2"
+            return addworker(exeflags = ["--threads=2"]; init_worker_code)
+        end
+        return nothing
+    end
+    testsuite = Dict(
+        "needs env var" => quote
+            @test ENV["SPECIAL_ENV_VAR"] == "42"
+            @test should_be_defined()
+        end,
+        "doesn't need env var" => quote
+            @test !haskey(ENV, "SPECIAL_ENV_VAR")
+            @test should_be_defined()
+        end,
+        "threads/1" => quote
+            @test Base.Threads.nthreads() == 1
+            @test should_be_defined()
+        end,
+        "threads/2" => quote
+            @test Base.Threads.nthreads() == 2
+            @test should_be_defined()
+        end
+    )
+
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--verbose"]; test_worker, init_code, init_worker_code, testsuite, stdout=io, stderr=io)
+
+    str = String(take!(io))
+    @test contains(str, r"needs env var .+ started at")
+    @test contains(str, r"doesn't need env var .+ started at")
+    @test contains(str, r"threads/1 .+ started at")
+    @test contains(str, r"threads/2 .+ started at")
+    @test contains(str, "SUCCESS")
+end
+
 @testset "failing test" begin
     testsuite = Dict(
         "failing test" => quote

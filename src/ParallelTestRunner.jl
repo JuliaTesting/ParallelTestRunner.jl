@@ -686,7 +686,7 @@ Several keyword arguments are also supported:
 - `init_code`: Code use to initialize each test's sandbox module (e.g., import auxiliary
   packages, define constants, etc).
 - `init_worker_code`: Code use to initialize each worker. This is run only once per worker instead of once per test.
-- `test_worker`: Optional function that takes a test name and returns a specific worker.
+- `test_worker`: Optional function that takes a test name and `init_worker_code` if `init_worker_code` is defined and returns a specific worker.
   When returning `nothing`, the test will be assigned to any available default worker.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 
@@ -996,11 +996,16 @@ function runtests(mod::Module, args::ParsedArgs;
                     test, test_t0
                 end
 
-                # if a worker failed, spawn a new one
-                wrkr = test_worker(test)
-                if wrkr ===  nothing
+                # pass in init_worker_code to custom worker function if defined
+                wrkr = if init_worker_code == :()
+                    test_worker(test)
+                else
+                    test_worker(test, init_worker_code)
+                end
+                if wrkr === nothing
                     wrkr = p
                 end
+                # if a worker failed, spawn a new one
                 if wrkr === nothing || !Malt.isrunning(wrkr)
                     wrkr = p = addworker(; init_worker_code, io_ctx.color)
                 end
