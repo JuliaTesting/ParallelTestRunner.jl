@@ -81,7 +81,7 @@ end
     end
     init_code = quote
         using Test
-       import ..should_be_defined, ..@should_also_be_defined
+        import ..should_be_defined, ..@should_also_be_defined
     end
 
     testsuite = Dict(
