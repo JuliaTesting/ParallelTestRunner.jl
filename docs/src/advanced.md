@@ -95,6 +95,38 @@ end # hide
 
 The `init_code` is evaluated in each test's sandbox module, so all definitions are available to your test files.
 
+## Worker Initialization
+
+For most situations, `init_code` described above should be used. However, if the common code takes so long to import that it makes a notable difference to run before every testset, you can use the `init_worker_code` keyword argument in [`runtests`](@ref) to have it run only once at worker initialization. However, you will also have to import the directly-used functionality in your testset module using `init_code` due to the way ParallelTestRunner.jl creates a temporary module for each testset.
+
+The example below is trivial and `init_worker_code` would not be necessary if this were used in a package, but it shows how it should be used. A real use-case of this is for tests using the GPUArrays.jl test suite; including it takes about 3s, so that 3s running before every testset can add a significant amount of runtime to the various GPU backend testsuites as opposed to running once when the runner is initally created.
+
+```@example mypackage
+using ParallelTestRunner
+using MyPackage
+
+const init_worker_code = quote
+    # Common code that's slow to import
+    function complex_common_test_helper(x)
+        return x * 2
+    end
+end
+
+const init_code = quote
+    # ParallelTestRunner creates a temporary module to run
+    #  each testset. `init_code` runs in this temporary module,
+    #  but code from `init_worker_code` that will be directly
+    #  called in a testset must be explicitly included in the
+    #  module namespace.
+    import ..complex_common_test_helper
+end
+
+cd(test_dir) do # hide
+runtests(MyPackage, ARGS; init_worker_code, init_code)
+end # hide
+```
+The `init_worker_code` is evaluated once per worker, so all definitions can be imported for use by the test module.
+
 ## Custom Workers
 
 For tests that require specific environment variables or Julia flags, you can use the `test_worker` keyword argument to [`runtests`](@ref) to assign tests to custom workers:
@@ -133,6 +165,11 @@ runtests(MyPackage, ARGS; test_worker, testsuite)
 The `test_worker` function receives the test name and should return either:
 - A worker object (from [`addworker`](@ref)) for tests that need special configuration
 - `nothing` to use the default worker pool
+
+!!! note
+    If your test suite uses both a `test_worker` function and `init_worker_code` as described in a prior section,
+    `test_worker` must also take in `init_worker_code` as a second argument. You are responsible for passing it to
+    [`addworker`](@ref) if your `init_code` depends on any `init_worker_code` definitions.
 
 ## Custom Arguments
 
@@ -200,7 +237,7 @@ function jltest {
 
 1. **Keep tests isolated**: Each test file runs in its own module, so avoid relying on global state between tests.
 
-1. **Use `init_code` for common setup**: Instead of duplicating setup code in each test file, use `init_code` to share common initialization.
+1. **Use `init_code` for common setup**: Instead of duplicating setup code in each test file, use `init_code` to share common initialization. For long-running initialization, consider using `init_worker_code` so that it is run only once per worker creation instead of before each test.
 
 1. **Filter tests appropriately**: Use [`filter_tests!`](@ref) to respect user-specified test filters while allowing additional programmatic filtering.
 
