@@ -32,9 +32,13 @@ end
     runtests(ParallelTestRunner, ["--debug-timing"]; stdout=io_color, stderr=io_color)
     str = String(take!(io))
 
+    @test contains(str, "time (s)") # timing
+
     @test contains(str, "Init") # debug timing
-    @test contains(str, "time (s)") # debug timing
-    @test contains(str, "Time (s)") # normal timing
+    if VERSION >= v"1.11" # compile time as part of the struct not available before 1.11
+        @test contains(str, "Compile") # debug timing
+        @test contains(str, "(%)") # debug timing
+    end
 end
 
 @testset "default njobs" begin
