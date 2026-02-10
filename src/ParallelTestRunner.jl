@@ -45,28 +45,18 @@ Malt.isrunning(wrkr::PTRWorker) = Malt.isrunning(wrkr.w)
 Malt.stop(wrkr::PTRWorker) = Malt.stop(wrkr.w)
 
 #Always set the max rss so that if tests add large global variables (which they do) we don't make the GC's life too hard
-_get_julia_test_maxrss_mb() = if haskey(ENV, "JULIA_TEST_MAXRSS_MB")
-    parse(Int, ENV["JULIA_TEST_MAXRSS_MB"])
-elseif Sys.WORD_SIZE == 64
-    Sys.total_memory() > 8*2^30 ? 3800 : 3000
-else
-    # Assume that we only have 3.5GB available to a single process, and that a single
-    # test can take up to 2GB of RSS.  This means that we should instruct the test
-    # framework to restart any worker that comes into a test set with 1.5GB of RSS.
-    1536
-end
-@static if isdefined(Base, :OncePerProcess) # VERSION >= v"1.12.0-DEV.1421"
-    const max_worker_rss = OncePerProcess{Int}() do
-        _get_julia_test_maxrss_mb() * 2^20
+function get_max_worker_rss()
+    mb = if haskey(ENV, "JULIA_TEST_MAXRSS_MB")
+        parse(Int, ENV["JULIA_TEST_MAXRSS_MB"])
+    elseif Sys.WORD_SIZE == 64
+        Sys.total_memory() > 8*2^30 ? 3800 : 3000
+    else
+        # Assume that we only have 3.5GB available to a single process, and that a single
+        # test can take up to 2GB of RSS.  This means that we should instruct the test
+        # framework to restart any worker that comes into a test set with 1.5GB of RSS.
+        1536
     end
-else
-    const _max_worker_rss::Ref{Int} = Ref{Int}(0)
-    function max_worker_rss()
-        if _max_worker_rss[] == 0
-            _max_worker_rss[] = _get_julia_test_maxrss_mb() * 2^20
-        end
-        _max_worker_rss[]
-    end
+    return mb * 2^20
 end
 
 function with_testset(f, testset)
@@ -679,7 +669,8 @@ end
              init_worker_code = :(),
              test_worker = Returns(nothing),
              stdout = Base.stdout,
-             stderr = Base.stderr)
+             stderr = Base.stderr,
+             max_worker_rss = get_max_worker_rss())
     runtests(mod::Module, ARGS; ...)
 
 Run Julia tests in parallel across multiple worker processes.
@@ -702,6 +693,7 @@ Several keyword arguments are also supported:
 - `test_worker`: Optional function that takes a test name and `init_worker_code` if `init_worker_code` is defined and returns a specific worker.
   When returning `nothing`, the test will be assigned to any available default worker.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
+- `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
 
 ## Command Line Options
 
@@ -777,7 +769,7 @@ issues during long test runs. The memory limit is set based on system architectu
 function runtests(mod::Module, args::ParsedArgs;
                   testsuite::Dict{String,Expr} = find_tests(pwd()),
                   init_code = :(), init_worker_code = :(), test_worker = Returns(nothing),
-                  stdout = Base.stdout, stderr = Base.stderr)
+                  stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss())
     #
     # set-up
     #
@@ -1050,7 +1042,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         break
                     end
 
-                    if memory_usage(result) > max_worker_rss()
+                    if memory_usage(result) > max_worker_rss
                         # the worker has reached the max-rss limit, recycle it
                         # so future tests start with a smaller working set
                         Malt.stop(wrkr)
