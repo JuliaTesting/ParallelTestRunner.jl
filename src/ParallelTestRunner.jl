@@ -45,16 +45,29 @@ Malt.isrunning(wrkr::PTRWorker) = Malt.isrunning(wrkr.w)
 Malt.stop(wrkr::PTRWorker) = Malt.stop(wrkr.w)
 
 #Always set the max rss so that if tests add large global variables (which they do) we don't make the GC's life too hard
-if Sys.WORD_SIZE == 64
-    const JULIA_TEST_MAXRSS_MB = Sys.total_memory() > 8*2^30 ? 3800 : 3000
+_get_julia_test_maxrss_mb() = if haskey(ENV, "JULIA_TEST_MAXRSS_MB")
+    parse(Int, ENV["JULIA_TEST_MAXRSS_MB"])
+elseif Sys.WORD_SIZE == 64
+    Sys.total_memory() > 8*2^30 ? 3800 : 3000
 else
     # Assume that we only have 3.5GB available to a single process, and that a single
     # test can take up to 2GB of RSS.  This means that we should instruct the test
     # framework to restart any worker that comes into a test set with 1.5GB of RSS.
-    const JULIA_TEST_MAXRSS_MB = 1536
+    1536
 end
-
-const max_worker_rss = JULIA_TEST_MAXRSS_MB * 2^20
+@static if isdefined(Base, :OncePerProcess) # VERSION >= v"1.12.0-DEV.1421"
+    const max_worker_rss = OncePerProcess{Int}() do
+        _get_julia_test_maxrss_mb() * 2^20
+    end
+else
+    const _max_worker_rss::Ref{Int} = Ref{Int}(0)
+    function max_worker_rss()
+        if _max_worker_rss[] == 0
+            _max_worker_rss[] = _get_julia_test_maxrss_mb() * 2^20
+        end
+        _max_worker_rss[]
+    end
+end
 
 function with_testset(f, testset)
     @static if VERSION >= v"1.13.0-DEV.1044"
@@ -1037,7 +1050,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         break
                     end
 
-                    if memory_usage(result) > max_worker_rss
+                    if memory_usage(result) > max_worker_rss()
                         # the worker has reached the max-rss limit, recycle it
                         # so future tests start with a smaller working set
                         Malt.stop(wrkr)
