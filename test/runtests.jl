@@ -30,9 +30,11 @@ end
     runtests(ParallelTestRunner, ["--debug-timing"]; stdout=io_color, stderr=io_color)
     str = String(take!(io))
 
+    @test contains(str, "time (s)") # timing
+
     @test contains(str, "Init") # debug timing
-    @test contains(str, "time (s)") # debug timing
-    @test contains(str, "Time (s)") # normal timing
+    @test contains(str, "Compile") # debug timing
+    @test contains(str, "(%)") # debug timing
 end
 
 @testset "subdir use" begin
