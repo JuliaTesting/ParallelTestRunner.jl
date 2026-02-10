@@ -86,6 +86,7 @@ struct TestRecord <: AbstractTestRecord
     time::Float64
     bytes::UInt64
     gctime::Float64
+    compile_time::Float64
     rss::UInt64
     total_time::Float64
 end
@@ -111,6 +112,7 @@ struct TestIOContext
     lock::ReentrantLock
     name_align::Int
     elapsed_align::Int
+    compile_align::Int
     gc_align::Int
     percent_align::Int
     alloc_align::Int
@@ -118,7 +120,8 @@ struct TestIOContext
 end
 
 function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, debug_timing::Bool)
-    elapsed_align = textwidth("Time (s)")
+    elapsed_align = textwidth("time (s)")
+    compile_align = textwidth("Compile")
     gc_align = textwidth("GC (s)")
     percent_align = textwidth("GC %")
     alloc_align = textwidth("Alloc (MB)")
@@ -127,7 +130,7 @@ function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align:
     color = get(stdout, :color, false)
 
     return TestIOContext(
-        stdout, stderr, color, debug_timing, lock, name_align, elapsed_align, gc_align, percent_align,
+        stdout, stderr, color, debug_timing, lock, name_align, elapsed_align, compile_align, gc_align, percent_align,
         alloc_align, rss_align
     )
 end
@@ -137,15 +140,15 @@ function print_header(ctx::TestIOContext, testgroupheader, workerheader)
     try
         # header top
         printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ")
-        printstyled(ctx.stdout, "         |", color = :white)
-        ctx.debug_timing && printstyled(ctx.stdout, "   Init   │", color = :white)
+        printstyled(ctx.stdout, "  Test   |", color = :white)
+        ctx.debug_timing && printstyled(ctx.stdout, "   Init   │ Compile │", color = :white)
         printstyled(ctx.stdout, " ──────────────── CPU ──────────────── │\n", color = :white)
 
         # header bottom
         printstyled(ctx.stdout, testgroupheader, color = :white)
         printstyled(ctx.stdout, lpad(workerheader, ctx.name_align - textwidth(testgroupheader) + 1), " │ ", color = :white)
-        printstyled(ctx.stdout, "Time (s) │", color = :white)
-        ctx.debug_timing && printstyled(ctx.stdout, " time (s) │", color = :white)
+        printstyled(ctx.stdout, "time (s) │", color = :white)
+        ctx.debug_timing && printstyled(ctx.stdout, " time (s) │   (%)   │", color = :white)
         printstyled(ctx.stdout, " GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │\n", color = :white)
         flush(ctx.stdout)
     finally
@@ -177,8 +180,13 @@ function print_test_finished(record::TestRecord, wrkr, test, ctx::TestIOContext)
         printstyled(ctx.stdout, lpad(time_str, ctx.elapsed_align, " "), " │ ", color = :white)
 
         if ctx.debug_timing
+            # pre-testset time
             init_time_str = @sprintf("%7.2f", record.total_time - time)
             printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align, " "), " │ ", color = :white)
+
+            # compilation time
+            init_time_str = @sprintf("%7.2f", Float64(100*record.compile_time/time))
+            printstyled(ctx.stdout, lpad(init_time_str, ctx.compile_align, " "), " │ ", color = :white)
         end
 
         gc_str = @sprintf("%5.2f", record.gctime)
@@ -323,7 +331,7 @@ function runtest(f, name, init_code, start_time)
                     $f
                 end
             end
-            (; testset=stats.value, stats.time, stats.bytes, stats.gctime)
+            (; testset=stats.value, stats.time, stats.bytes, stats.gctime, stats.compile_time)
         end
 
         # process results
