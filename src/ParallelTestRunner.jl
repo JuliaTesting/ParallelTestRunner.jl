@@ -46,7 +46,7 @@ Malt.stop(wrkr::PTRWorker) = Malt.stop(wrkr.w)
 
 #Always set the max rss so that if tests add large global variables (which they do) we don't make the GC's life too hard
 if Sys.WORD_SIZE == 64
-    const JULIA_TEST_MAXRSS_MB = 3800
+    const JULIA_TEST_MAXRSS_MB = Sys.total_memory() > 8*2^30 ? 3800 : 3000
 else
     # Assume that we only have 3.5GB available to a single process, and that a single
     # test can take up to 2GB of RSS.  This means that we should instruct the test
