@@ -33,8 +33,10 @@ end
     @test contains(str, "time (s)") # timing
 
     @test contains(str, "Init") # debug timing
-    @test contains(str, "Compile") # debug timing
-    @test contains(str, "(%)") # debug timing
+    if VERSION >= v"1.11" # compile time as part of the struct not available before 1.11
+        @test contains(str, "Compile") # debug timing
+        @test contains(str, "(%)") # debug timing
+    end
 end
 
 @testset "subdir use" begin
