@@ -141,14 +141,16 @@ function print_header(ctx::TestIOContext, testgroupheader, workerheader)
         # header top
         printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ")
         printstyled(ctx.stdout, "  Test   |", color = :white)
-        ctx.debug_timing && printstyled(ctx.stdout, "   Init   │ Compile │", color = :white)
+        ctx.debug_timing && printstyled(ctx.stdout, "   Init   │", color = :white)
+        VERSION >= v"1.11" && ctx.debug_timing && printstyled(ctx.stdout, " Compile │", color = :white)
         printstyled(ctx.stdout, " ──────────────── CPU ──────────────── │\n", color = :white)
 
         # header bottom
         printstyled(ctx.stdout, testgroupheader, color = :white)
         printstyled(ctx.stdout, lpad(workerheader, ctx.name_align - textwidth(testgroupheader) + 1), " │ ", color = :white)
         printstyled(ctx.stdout, "time (s) │", color = :white)
-        ctx.debug_timing && printstyled(ctx.stdout, " time (s) │   (%)   │", color = :white)
+        ctx.debug_timing && printstyled(ctx.stdout, " time (s) │", color = :white)
+        VERSION >= v"1.11" && ctx.debug_timing && printstyled(ctx.stdout, "   (%)   │", color = :white)
         printstyled(ctx.stdout, " GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │\n", color = :white)
         flush(ctx.stdout)
     finally
@@ -185,8 +187,10 @@ function print_test_finished(record::TestRecord, wrkr, test, ctx::TestIOContext)
             printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align, " "), " │ ", color = :white)
 
             # compilation time
-            init_time_str = @sprintf("%7.2f", Float64(100*record.compile_time/time))
-            printstyled(ctx.stdout, lpad(init_time_str, ctx.compile_align, " "), " │ ", color = :white)
+            if VERSION >= v"1.11"
+                init_time_str = @sprintf("%7.2f", Float64(100*record.compile_time/time))
+                printstyled(ctx.stdout, lpad(init_time_str, ctx.compile_align, " "), " │ ", color = :white)
+            end
         end
 
         gc_str = @sprintf("%5.2f", record.gctime)
@@ -331,7 +335,9 @@ function runtest(f, name, init_code, start_time)
                     $f
                 end
             end
-            (; testset=stats.value, stats.time, stats.bytes, stats.gctime, stats.compile_time)
+
+            compile_time = @static VERSION >= v"1.11" ? stats.compile_time : 0.0
+            (; testset=stats.value, stats.time, stats.bytes, stats.gctime, compile_time)
         end
 
         # process results
