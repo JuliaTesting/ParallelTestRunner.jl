@@ -24,6 +24,24 @@ cd(@__DIR__)
     @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
 end
 
+@testset "debug timing" begin
+    io = IOBuffer()
+    io_color = IOContext(io, :color => true)
+    runtests(ParallelTestRunner, ["--debug-stats"]; stdout=io_color, stderr=io_color)
+    str = String(take!(io))
+
+    @test contains(str, "time (s)")
+
+    @test contains(str, "Available memory:")
+    @test contains(str, "Init")
+
+     # compile time as part of the struct not available before 1.11
+    if VERSION >= v"1.11"
+        @test contains(str, "Compile")
+        @test contains(str, "(%)")
+    end
+end
+
 @testset "subdir use" begin
     d = @__DIR__
     testsuite = find_tests(d)
