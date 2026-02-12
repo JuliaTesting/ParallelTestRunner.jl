@@ -108,7 +108,7 @@ struct TestIOContext
     stdout::IO
     stderr::IO
     color::Bool
-    debug_timing::Bool
+    debug_stats::Bool
     lock::ReentrantLock
     name_align::Int
     elapsed_align::Int
@@ -119,7 +119,7 @@ struct TestIOContext
     rss_align::Int
 end
 
-function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, debug_timing::Bool)
+function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, debug_stats::Bool)
     elapsed_align = textwidth("time (s)")
     compile_align = textwidth("Compile")
     gc_align = textwidth("GC (s)")
@@ -130,7 +130,7 @@ function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align:
     color = get(stdout, :color, false)
 
     return TestIOContext(
-        stdout, stderr, color, debug_timing, lock, name_align, elapsed_align, compile_align, gc_align, percent_align,
+        stdout, stderr, color, debug_stats, lock, name_align, elapsed_align, compile_align, gc_align, percent_align,
         alloc_align, rss_align
     )
 end
@@ -141,16 +141,16 @@ function print_header(ctx::TestIOContext, testgroupheader, workerheader)
         # header top
         printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ")
         printstyled(ctx.stdout, "  Test   |", color = :white)
-        ctx.debug_timing && printstyled(ctx.stdout, "   Init   │", color = :white)
-        VERSION >= v"1.11" && ctx.debug_timing && printstyled(ctx.stdout, " Compile │", color = :white)
+        ctx.debug_stats && printstyled(ctx.stdout, "   Init   │", color = :white)
+        VERSION >= v"1.11" && ctx.debug_stats && printstyled(ctx.stdout, " Compile │", color = :white)
         printstyled(ctx.stdout, " ──────────────── CPU ──────────────── │\n", color = :white)
 
         # header bottom
         printstyled(ctx.stdout, testgroupheader, color = :white)
         printstyled(ctx.stdout, lpad(workerheader, ctx.name_align - textwidth(testgroupheader) + 1), " │ ", color = :white)
         printstyled(ctx.stdout, "time (s) │", color = :white)
-        ctx.debug_timing && printstyled(ctx.stdout, " time (s) │", color = :white)
-        VERSION >= v"1.11" && ctx.debug_timing && printstyled(ctx.stdout, "   (%)   │", color = :white)
+        ctx.debug_stats && printstyled(ctx.stdout, " time (s) │", color = :white)
+        VERSION >= v"1.11" && ctx.debug_stats && printstyled(ctx.stdout, "   (%)   │", color = :white)
         printstyled(ctx.stdout, " GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │\n", color = :white)
         flush(ctx.stdout)
     finally
@@ -181,7 +181,7 @@ function print_test_finished(record::TestRecord, wrkr, test, ctx::TestIOContext)
         time_str = @sprintf("%7.2f", time)
         printstyled(ctx.stdout, lpad(time_str, ctx.elapsed_align, " "), " │ ", color = :white)
 
-        if ctx.debug_timing
+        if ctx.debug_stats
             # pre-testset time
             init_time_str = @sprintf("%7.2f", record.total_time - time)
             printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align, " "), " │ ", color = :white)
@@ -577,7 +577,7 @@ Fields are
 
 * `jobs::Union{Some{Int}, Nothing}`: the number of jobs
 * `verbose::Union{Some{Nothing}, Nothing}`: whether verbose printing was enabled
-* `debug_timing::Union{Some{Nothing}, Nothing}`: whether debug timing printing was enabled
+* `debug_stats::Union{Some{Nothing}, Nothing}`: whether debug stats printing was enabled
 * `quickfail::Union{Some{Nothing}, Nothing}`: whether quick fail was enabled
 * `list::Union{Some{Nothing}, Nothing}`: whether tests should be listed
 * `custom::Dict{String,Any}`: a dictionary of custom arguments
@@ -586,7 +586,7 @@ Fields are
 struct ParsedArgs
     jobs::Union{Some{Int}, Nothing}
     verbose::Union{Some{Nothing}, Nothing}
-    debug_timing::Union{Some{Nothing}, Nothing}
+    debug_stats::Union{Some{Nothing}, Nothing}
     quickfail::Union{Some{Nothing}, Nothing}
     list::Union{Some{Nothing}, Nothing}
 
@@ -645,7 +645,7 @@ function parse_args(args; custom::Array{String} = String[])
                --verbose          Print more information during testing.
                --quickfail        Fail the entire run as soon as a single test errored.
                --jobs=N           Launch `N` processes to perform tests.
-               --debug-timing     Print testset initialization timings."""
+               --debug-stats      Print information that could be helpful for debugging testset slowdowns."""
 
         if !isempty(custom)
             usage *= "\n\nCustom arguments:"
@@ -660,7 +660,7 @@ function parse_args(args; custom::Array{String} = String[])
 
     jobs = extract_flag!(args, "--jobs"; typ = Int)
     verbose = extract_flag!(args, "--verbose")
-    debug_timing = extract_flag!(args, "--debug-timing")
+    debug_stats = extract_flag!(args, "--debug-stats")
     quickfail = extract_flag!(args, "--quickfail")
     list = extract_flag!(args, "--list")
 
@@ -675,7 +675,7 @@ function parse_args(args; custom::Array{String} = String[])
         error("Unknown test options `$(join(optlike_args, " "))` (try `--help` for usage instructions)")
     end
 
-    return ParsedArgs(jobs, verbose, debug_timing, quickfail, list, custom_args, args)
+    return ParsedArgs(jobs, verbose, debug_stats, quickfail, list, custom_args, args)
 end
 
 """
@@ -875,7 +875,7 @@ function runtests(mod::Module, args::ParsedArgs;
         stderr.lock = print_lock
     end
 
-    io_ctx = test_IOContext(stdout, stderr, print_lock, name_align, !isnothing(args.debug_timing))
+    io_ctx = test_IOContext(stdout, stderr, print_lock, name_align, !isnothing(args.debug_stats))
     print_header(io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
