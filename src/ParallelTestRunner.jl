@@ -835,6 +835,7 @@ function runtests(mod::Module, args::ParsedArgs;
     jobs = something(args.jobs, default_njobs())
     jobs = clamp(jobs, 1, length(tests))
     println(stdout, "Running $jobs tests in parallel. If this is too many, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
+    !isnothing(args.debug_stats) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
     workers = fill(nothing, jobs)
 
     t0 = time()
