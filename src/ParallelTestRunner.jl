@@ -140,7 +140,7 @@ function print_header(ctx::TestIOContext, testgroupheader, workerheader)
     try
         # header top
         printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ")
-        printstyled(ctx.stdout, "  Test   |", color = :white)
+        printstyled(ctx.stdout, "  Test   │", color = :white)
         ctx.debug_stats && printstyled(ctx.stdout, "   Init   │", color = :white)
         VERSION >= v"1.11" && ctx.debug_stats && printstyled(ctx.stdout, " Compile │", color = :white)
         printstyled(ctx.stdout, " ──────────────── CPU ──────────────── │\n", color = :white)
@@ -215,7 +215,7 @@ function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
         printstyled(ctx.stderr, test, color = :red)
         printstyled(
             ctx.stderr,
-            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " |"
+            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │"
             , color = :red
         )
         time = record.time
@@ -228,7 +228,7 @@ function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
         end
 
         failed_str = "failed at $(now())\n"
-        # 11 -> 3 from " | " 3x and 2 for each " " on either side
+        # 11 -> 3 from " │ " 3x and 2 for each " " on either side
         fail_align = (11 + ctx.gc_align + ctx.percent_align + ctx.alloc_align + ctx.rss_align - textwidth(failed_str)) ÷ 2 + textwidth(failed_str)
         failed_str = lpad(failed_str, fail_align, " ")
         printstyled(ctx.stderr, failed_str, color = :red)
@@ -247,7 +247,7 @@ function print_test_crashed(wrkr, test, ctx::TestIOContext)
         printstyled(ctx.stderr, test, color = :red)
         printstyled(
             ctx.stderr,
-            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " |",
+            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │",
             " "^ctx.elapsed_align, " crashed at $(now())\n", color = :red
         )
 
