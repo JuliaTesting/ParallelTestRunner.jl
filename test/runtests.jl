@@ -27,7 +27,7 @@ end
 @testset "debug timing" begin
     io = IOBuffer()
     io_color = IOContext(io, :color => true)
-    runtests(ParallelTestRunner, ["--debug-timing"]; stdout=io_color, stderr=io_color)
+    runtests(ParallelTestRunner, ["--debug-stats"]; stdout=io_color, stderr=io_color)
     str = String(take!(io))
 
     @test contains(str, "time (s)") # timing
