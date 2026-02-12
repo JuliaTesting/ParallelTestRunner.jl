@@ -935,7 +935,7 @@ function runtests(mod::Module, args::ParsedArgs;
 
             eta_sec = est_remaining / jobs
             eta_mins = round(Int, eta_sec / 60)
-            line3 *= " | ETA: ~$eta_mins min"
+            line3 *= " │ ETA: ~$eta_mins min"
         end
 
         # only display the status bar on actual terminals
