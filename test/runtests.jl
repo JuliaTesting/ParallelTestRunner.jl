@@ -30,12 +30,15 @@ end
     runtests(ParallelTestRunner, ["--debug-stats"]; stdout=io_color, stderr=io_color)
     str = String(take!(io))
 
-    @test contains(str, "time (s)") # timing
+    @test contains(str, "time (s)")
 
-    @test contains(str, "Init") # debug timing
-    if VERSION >= v"1.11" # compile time as part of the struct not available before 1.11
-        @test contains(str, "Compile") # debug timing
-        @test contains(str, "(%)") # debug timing
+    @test contains(str, "Available memory:")
+    @test contains(str, "Init")
+
+     # compile time as part of the struct not available before 1.11
+    if VERSION >= v"1.11"
+        @test contains(str, "Compile")
+        @test contains(str, "(%)")
     end
 end
 
