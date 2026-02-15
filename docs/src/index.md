@@ -141,7 +141,7 @@ Each test file runs in its own isolated module, so you don't need to worry about
 
 ## Packages using ParallelTestRunner.jl
 
-There are a few packages already [using `ParallelTestRunner.jl`](https://github.com/search?q=%22using+ParallelTestRunner%22+language%3AJulia++NOT+is%3Aarchived+NOT+is%3Afork+path%3A%2F%5Etest%5C%2Fruntests.jl%2F&type=code) to parallelize their tests, you can look at their setups if you need inspiration to move your packages as well:
+There are a few packages already [using `ParallelTestRunner.jl`](https://github.com/search?q=%2Fusing.*+ParallelTestRunner%2F+language%3AJulia++NOT+is%3Aarchived+NOT+is%3Afork+path%3A%2F%5Etest%5C%2Fruntests.jl%2F&type=code) to parallelize their tests, you can look at their setups if you need inspiration to move your packages as well:
 
 * [`ApproxFun.jl`](https://github.com/JuliaApproximation/ApproxFun.jl/blob/master/test/runtests.jl)
 * [`BlockArrays.jl`](https://github.com/JuliaArrays/BlockArrays.jl/blob/master/test/runtests.jl)
