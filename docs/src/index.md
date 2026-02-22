@@ -153,6 +153,7 @@ Among them are:
 * [`GPUArrays.jl`](https://github.com/JuliaGPU/GPUArrays.jl/blob/master/test/runtests.jl)
 * [`GPUCompiler.jl`](https://github.com/JuliaGPU/GPUCompiler.jl/blob/master/test/runtests.jl)
 * [`HyperHessians.jl`](https://github.com/KristofferC/HyperHessians.jl/blob/master/test/runtests.jl)
+* [`MathOptInterface.jl`](https://github.com/jump-dev/MathOptInterface.jl/blob/master/test/runtests.jl)
 * [`Metal.jl`](https://github.com/JuliaGPU/Metal.jl/blob/main/test/runtests.jl)
 * [`Reactant.jl`](https://github.com/EnzymeAD/Reactant.jl/blob/main/test/runtests.jl)
 * [`WCS.jl`](https://github.com/JuliaAstro/WCS.jl/blob/master/test/runtests.jl)
