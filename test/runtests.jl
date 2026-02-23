@@ -373,4 +373,25 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "switching projects" begin
+    testsuite = Dict(
+        "first" => quote
+            using Pkg
+            Pkg.activate(; temp=true)
+            @test 1 + 1 == 2
+        end,
+        "second" => quote
+            @test 2 * 2 == 4
+        end
+    )
+
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--verbose", "--jobs=1"]; testsuite, stdout=io, stderr=io)
+
+    str = String(take!(io))
+    @test contains(str, r"first .+ started at")
+    @test contains(str, r"second .+ started at")
+    @test contains(str, "SUCCESS")
+end
+
 end

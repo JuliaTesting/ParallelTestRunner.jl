@@ -293,13 +293,18 @@ function runtest(f, name, init_code)
         data = @eval mod begin
             GC.gc(true)
             Random.seed!(1)
+            project = Base.active_project()
 
             # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
             # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
             # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
             stats = @timed @testset WorkerTestSet "placeholder" begin
                 @testset DefaultTestSet $name begin
-                    $f
+                    try
+                        $f
+                    finally
+                        Base.set_active_project(project)
+                    end
                 end
             end
             (; testset=stats.value, stats.time, stats.bytes, stats.gctime)
