@@ -49,7 +49,7 @@ function get_max_worker_rss()
     mb = if haskey(ENV, "JULIA_TEST_MAXRSS_MB")
         parse(Int, ENV["JULIA_TEST_MAXRSS_MB"])
     elseif Sys.WORD_SIZE == 64
-        Sys.total_memory() > 8*2^30 ? 3800 : 3000
+        Sys.total_memory() > 8*Int64(2)^30 ? 3800 : 3000
     else
         # Assume that we only have 3.5GB available to a single process, and that a single
         # test can take up to 2GB of RSS.  This means that we should instruct the test
@@ -389,7 +389,7 @@ Determine default number of parallel jobs.
 """
 function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_memory())
     jobs = cpu_threads
-    memory_jobs = Int64(free_memory) ÷ (2 * 2^30)
+    memory_jobs = Int64(free_memory) ÷ (2 * Int64(2)^30)
     return max(1, min(jobs, memory_jobs))
 end
 
