@@ -431,6 +431,20 @@ function test_exe(color::Bool=false)
     push!(test_exeflags.exec, "--depwarn=yes")
     push!(test_exeflags.exec, "--project=$(Base.active_project())")
     push!(test_exeflags.exec, "--color=$(color ? "yes" : "no")")
+
+    opts = Base.JLOptions()
+    if opts.code_coverage == 1
+        push!(test_exeflags.exec, "--code-coverage=user")
+    elseif opts.code_coverage == 2
+        if opts.output_code_coverage != C_NULL
+            push!(test_exeflags.exec, "--code-coverage=$(unsafe_string(opts.output_code_coverage))")
+        else
+            push!(test_exeflags.exec, "--code-coverage=all")
+        end
+    elseif opts.code_coverage == 3
+        push!(test_exeflags.exec, "--code-coverage=@$(unsafe_string(opts.tracked_path))")
+    end
+
     return test_exeflags
 end
 
