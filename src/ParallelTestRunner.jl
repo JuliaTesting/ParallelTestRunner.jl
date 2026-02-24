@@ -423,12 +423,6 @@ end
 
 function test_exe(color::Bool=false)
     test_exeflags = Base.julia_cmd()
-    filter!(test_exeflags.exec) do c
-        !(startswith(c, "--depwarn") || startswith(c, "--check-bounds"))
-    end
-    push!(test_exeflags.exec, "--check-bounds=yes")
-    push!(test_exeflags.exec, "--startup-file=no")
-    push!(test_exeflags.exec, "--depwarn=yes")
     push!(test_exeflags.exec, "--project=$(Base.active_project())")
     push!(test_exeflags.exec, "--color=$(color ? "yes" : "no")")
     return test_exeflags
