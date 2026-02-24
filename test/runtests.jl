@@ -24,6 +24,15 @@ cd(@__DIR__)
     @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
 end
 
+@testset "default njobs" begin
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 28) == 1
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 30) == 1
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 31) == 1
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 32) == 2
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 33) == 4
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 34) == 4
+end
+
 @testset "subdir use" begin
     d = @__DIR__
     testsuite = find_tests(d)
