@@ -3,6 +3,8 @@ using Test
 
 cd(@__DIR__)
 
+include(joinpath(@__DIR__, "utils.jl"))
+
 @testset "ParallelTestRunner" verbose=true begin
 
 @testset "basic use" begin
@@ -401,35 +403,6 @@ end
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
 end
 
-# Count direct child processes of current process (for default-worker test).
-# Returns -1 if unsupported so the test can be skipped.
-function _count_child_pids()
-    pid = getpid()
-    if Sys.isunix() && !isnothing(Sys.which("ps"))
-        pids = Int[]
-        out = try
-            # Suggested in <https://askubuntu.com/a/512872>.
-            readchomp(`ps -o ppid= -o pid= -A`)
-        catch
-            return -1
-        end
-        lines = split(out, '\n')
-        # The output of `ps` always contains `ps` itself because it's spawned by
-        # the current process, so we subtract one to always exclude it.
-        count = -1
-        for line in lines
-            m = match(r" *(\d+) +(\d+)", line)
-            if !isnothing(m)
-                if parse(Int, m[1]) == pid
-                    count += 1
-                end
-            end
-        end
-        return count
-    else
-        return -1
-    end
-end
 
 # Issue <https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/106>.
 @testset "default workers stopped at end" begin
@@ -441,7 +414,17 @@ end
         "t3" => :(),
         "t4" => :(),
         "t5" => :(),
-        "t6" => :(),
+        "t6" => quote
+            # Make this test run longer than the others so that it runs alone...
+            sleep(5)
+            children = _count_child_pids($(getpid()))
+            # ...then check there's only one worker still running. WARNING: this test may be
+            # flaky on very busy systems, if at this point some of the other tests are still
+            # running, hope for the best.
+            if children >= 0
+                @test children == 1
+            end
+        end,
     )
     before = _count_child_pids()
     if before < 0
@@ -450,7 +433,19 @@ end
     else
         old_id_counter = ParallelTestRunner.ID_COUNTER[]
         njobs = 2
-        runtests(ParallelTestRunner, ["--jobs=$(njobs)", "--verbose"]; testsuite, stdout=devnull, stderr=devnull)
+        io = IOBuffer()
+        ioc = IOContext(io, :color => true)
+        try
+            runtests(ParallelTestRunner, ["--jobs=$(njobs)", "--verbose"];
+                     testsuite, stdout=ioc, stderr=ioc, init_code=:(include($(joinpath(@__DIR__, "utils.jl")))))
+        catch
+            # Show output in case of failure, to help debugging.
+            output = String(take!(io))
+            printstyled(stderr, "Output of failed test >>>>>>>>>>>>>>>>>>>>\n", color=:red, bold=true)
+            println(stderr, output)
+            printstyled(stderr, "End of output <<<<<<<<<<<<<<<<<<<<<<<<<<<<\n", color=:red, bold=true)
+            rethrow()
+        end
         # Make sure we didn't spawn more workers than expected.
         @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
         # Allow a moment for worker processes to exit
