@@ -791,6 +791,7 @@ function runtests(mod::Module, args::ParsedArgs;
     jobs::Int = clamp(_jobs, 1, length(tests))
     println(stdout, "Running $jobs tests in parallel. If this is too many, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
     nworkers = min(jobs, length(tests))
+    workers = fill(nothing, nworkers)
 
     t0 = time()
     results = []
@@ -980,7 +981,7 @@ function runtests(mod::Module, args::ParsedArgs;
     #
 
     worker_tasks = Task[]
-    for _ in 1:nworkers
+    for p in workers
         push!(worker_tasks, @async begin
             while !done[]
                 # get a test to run
@@ -1000,11 +1001,14 @@ function runtests(mod::Module, args::ParsedArgs;
                 else
                     test_worker(test, init_worker_code)
                 end
+                # Create a new binding instead of assigning to the existing one to avoid `p` from being boxed
+                p2 = p
+                if wrkr === nothing
+                    wrkr = p2
+                end
                 # if a worker failed, spawn a new one
-                p = if isnothing(wrkr) || !Malt.isrunning(wrkr)
-                    wrkr = addworker(; init_worker_code, io_ctx.color)
-                else
-                    nothing
+                if wrkr === nothing || !Malt.isrunning(wrkr)
+                    wrkr = p2 = addworker(; init_worker_code, io_ctx.color)
                 end
 
                 # run the test
@@ -1053,7 +1057,7 @@ function runtests(mod::Module, args::ParsedArgs;
                 end
 
                 # get rid of the custom worker
-                if wrkr != p
+                if wrkr != p2
                     Malt.stop(wrkr)
                 end
 
