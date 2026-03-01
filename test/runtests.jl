@@ -382,4 +382,23 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "reuse of workers" begin
+    testsuite = Dict(
+        "a" => :(),
+        "b" => :(),
+        "c" => :(),
+        "d" => :(),
+        "e" => :(),
+        "f" => :(),
+    )
+    io = IOBuffer()
+    ioc = IOContext(io, :color => true)
+    old_id_counter = ParallelTestRunner.ID_COUNTER[]
+    njobs = 1
+    runtests(ParallelTestRunner, ["--jobs=$(njobs)"]; testsuite, stdout=ioc, stderr=ioc)
+    str = String(take!(io))
+    @test contains(str, "Running $(njobs) tests in parallel")
+    @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
+end
+
 end
