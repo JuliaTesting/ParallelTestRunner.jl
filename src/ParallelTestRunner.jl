@@ -787,20 +787,21 @@ function runtests(mod::Module, args::ParsedArgs;
     sort!(tests, by = x -> -get(historical_durations, x, Inf))
 
     # determine parallelism
-    _jobs = something(args.jobs, default_njobs())
-    jobs::Int = clamp(_jobs, 1, length(tests))
+    jobs = something(args.jobs, default_njobs())
+    jobs = clamp(jobs, 1, length(tests))
     println(stdout, "Running $jobs tests in parallel. If this is too many, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
     nworkers = min(jobs, length(tests))
+    workers = fill(nothing, nworkers)
 
     t0 = time()
     results = []
     running_tests = Dict{String, Float64}()  # test => start_time
     test_lock = ReentrantLock() # to protect crucial access to tests and running_tests
 
-    done = Ref(false)
+    done = false
     function stop_work()
-        if !done[]
-            done[] = true
+        if !done
+            done = true
             for task in worker_tasks
                 task == current_task() && continue
                 Base.istaskdone(task) && continue
@@ -949,7 +950,7 @@ function runtests(mod::Module, args::ParsedArgs;
                 end
 
                 # After a while, display a status line
-                if !done[] && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 1))
+                if !done && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 1))
                     update_status()
                     last_status_update[] = time()
                 end
@@ -980,9 +981,9 @@ function runtests(mod::Module, args::ParsedArgs;
     #
 
     worker_tasks = Task[]
-    for _ in 1:nworkers
+    for p in workers
         push!(worker_tasks, @async begin
-            while !done[]
+            while !done
                 # get a test to run
                 test, test_t0 = Base.@lock test_lock begin
                     isempty(tests) && break
@@ -1000,11 +1001,12 @@ function runtests(mod::Module, args::ParsedArgs;
                 else
                     test_worker(test, init_worker_code)
                 end
+                if wrkr === nothing
+                    wrkr = p
+                end
                 # if a worker failed, spawn a new one
-                p = if isnothing(wrkr) || !Malt.isrunning(wrkr)
-                    wrkr = addworker(; init_worker_code, io_ctx.color)
-                else
-                    nothing
+                if wrkr === nothing || !Malt.isrunning(wrkr)
+                    wrkr = p = addworker(; init_worker_code, io_ctx.color)
                 end
 
                 # run the test
@@ -1073,7 +1075,7 @@ function runtests(mod::Module, args::ParsedArgs;
             if any(istaskfailed, worker_tasks)
                 println(io_ctx.stderr, "\nCaught an error, stopping...")
                 break
-            elseif done[] || Base.@lock(test_lock, isempty(tests) && isempty(running_tests))
+            elseif done || Base.@lock(test_lock, isempty(tests) && isempty(running_tests))
                 break
             end
             sleep(1)
