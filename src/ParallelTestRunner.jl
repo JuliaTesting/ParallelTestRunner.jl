@@ -1001,7 +1001,7 @@ function runtests(mod::Module, args::ParsedArgs;
                 else
                     test_worker(test, init_worker_code)
                 end
-                # Use a copy of p to prevent it from being boxed
+                # Create a new binding instead of assigning to the existing one to avoid `p` from being boxed
                 p2 = p
                 if wrkr === nothing
                     wrkr = p2
