@@ -797,6 +797,8 @@ function runtests(mod::Module, args::ParsedArgs;
     running_tests = Dict{String, Float64}()  # test => start_time
     test_lock = ReentrantLock() # to protect crucial access to tests and running_tests
 
+    worker_tasks = Task[]
+
     done = Ref(false)
     function stop_work()
         if !done[]
@@ -979,7 +981,6 @@ function runtests(mod::Module, args::ParsedArgs;
     # execution
     #
 
-    worker_tasks = Task[]
     for _ in 1:nworkers
         push!(worker_tasks, @async begin
             while !done[]
