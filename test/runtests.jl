@@ -408,22 +408,24 @@ function _count_child_pids()
     if Sys.isunix() && !isnothing(Sys.which("ps"))
         pids = Int[]
         out = try
+            # Suggested in <https://askubuntu.com/a/512872>.
             readchomp(`ps -o ppid= -o pid= -A`)
         catch
             return -1
         end
         lines = split(out, '\n')
+        # The output of `ps` always contains `ps` itself because it's spawned by
+        # the current process, so we subtract one to always exclude it.
+        count = -1
         for line in lines
             m = match(r" *(\d+) +(\d+)", line)
             if !isnothing(m)
                 if parse(Int, m[1]) == pid
-                    push!(pids, parse(Int, m[2]))
+                    count += 1
                 end
             end
         end
-        # The output of `ps` always contains `ps` itself because it's spawn by
-        # the current process, so we subtract one to always exclude it.
-        return length(pids) - 1
+        return count
     else
         return -1
     end
@@ -444,11 +446,12 @@ end
     before = _count_child_pids()
     if before < 0
         # Counting child PIDs not supported on this platform
-        @test_broken false
+        @test_skip false
     else
         old_id_counter = ParallelTestRunner.ID_COUNTER[]
         njobs = 2
         runtests(ParallelTestRunner, ["--jobs=$(njobs)", "--verbose"]; testsuite, stdout=devnull, stderr=devnull)
+        # Make sure we didn't spawn more workers than expected.
         @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
         # Allow a moment for worker processes to exit
         for _ in 1:50
