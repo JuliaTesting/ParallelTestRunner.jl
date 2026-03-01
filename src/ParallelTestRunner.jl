@@ -1059,7 +1059,14 @@ function runtests(mod::Module, args::ParsedArgs;
                     Malt.stop(wrkr)
                 end
 
-                delete!(running_tests, test)
+                Base.@lock test_lock begin
+                    # Stop worker if there are no more tests remaining to run.
+                    if isempty(tests) && !isnothing(wrkr) && Malt.isrunning(wrkr)
+                        Malt.stop(wrkr)
+                    end
+
+                    delete!(running_tests, test)
+                end
             end
         end)
     end
