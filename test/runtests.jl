@@ -401,4 +401,88 @@ end
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
 end
 
+# Count direct child processes of current process (for default-worker test).
+# Returns -1 if unsupported so the test can be skipped.
+function _count_child_pids()
+    pid = getpid()
+    if Sys.isunix() && !isnothing(Sys.which("ps"))
+        pids = Int[]
+        out = try
+            readchomp(`ps -o ppid= -o pid= -A`)
+        catch
+            return -1
+        end
+        lines = split(out, '\n')
+        for line in lines
+            m = match(r" *(\d+) +(\d+)", line)
+            if !isnothing(m)
+                if parse(Int, m[1]) == pid
+                    push!(pids, parse(Int, m[2]))
+                end
+            end
+        end
+        # The output of `ps` always contains `ps` itself because it's spawn by
+        # the current process, so we subtract one to always exclude it.
+        return length(pids) - 1
+    else
+        return -1
+    end
+end
+
+# Issue <https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/106>.
+@testset "default workers stopped at end" begin
+    # Use default workers (no test_worker) so the framework creates and should stop them.
+    # More tests than workers so some tasks finish early and must stop their worker.
+    testsuite = Dict(
+        "t1" => :(),
+        "t2" => :(),
+        "t3" => :(),
+        "t4" => :(),
+        "t5" => :(),
+        "t6" => :(),
+    )
+    before = _count_child_pids()
+    if before < 0
+        # Counting child PIDs not supported on this platform
+        @test_broken false
+    else
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        njobs = 2
+        runtests(ParallelTestRunner, ["--jobs=$(njobs)", "--verbose"]; testsuite, stdout=devnull, stderr=devnull)
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
+        # Allow a moment for worker processes to exit
+        for _ in 1:50
+            sleep(0.1)
+            after = _count_child_pids()
+            after >= 0 && after <= before && break
+        end
+        after = _count_child_pids()
+        @test after >= 0
+        @test after == before
+    end
+end
+
+# Custom workers are handled differently:
+# <https://github.com/JuliaTesting/ParallelTestRunner.jl/pull/107#issuecomment-3980645143>.
+# But we still want to make sure they're terminated at the end.
+@testset "custom workers stopped at end" begin
+    testsuite = Dict(
+        "a" => :(),
+        "b" => :(),
+        "c" => :(),
+        "d" => :(),
+        "e" => :(),
+        "f" => :(),
+    )
+    procs = Base.Process[]
+    procs_lock = ReentrantLock()
+    function test_worker(name)
+        wrkr = addworker()
+        Base.@lock procs_lock push!(procs, wrkr.w.proc)
+        return wrkr
+    end
+    runtests(ParallelTestRunner, Base.ARGS; test_worker, testsuite, stdout=devnull, stderr=devnull)
+    @test all(!Base.process_running, procs)
+end
+
 end
