@@ -3,6 +3,8 @@ using Test
 
 cd(@__DIR__)
 
+include(joinpath(@__DIR__, "utils.jl"))
+
 @testset "ParallelTestRunner" verbose=true begin
 
 @testset "basic use" begin
@@ -399,6 +401,86 @@ end
     str = String(take!(io))
     @test contains(str, "Running $(njobs) tests in parallel")
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
+end
+
+
+# Issue <https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/106>.
+@testset "default workers stopped at end" begin
+    # Use default workers (no test_worker) so the framework creates and should stop them.
+    # More tests than workers so some tasks finish early and must stop their worker.
+    testsuite = Dict(
+        "t1" => :(),
+        "t2" => :(),
+        "t3" => :(),
+        "t4" => :(),
+        "t5" => :(),
+        "t6" => quote
+            # Make this test run longer than the others so that it runs alone...
+            sleep(5)
+            children = _count_child_pids($(getpid()))
+            # ...then check there's only one worker still running. WARNING: this test may be
+            # flaky on very busy systems, if at this point some of the other tests are still
+            # running, hope for the best.
+            if children >= 0
+                @test children == 1
+            end
+        end,
+    )
+    before = _count_child_pids()
+    if before < 0
+        # Counting child PIDs not supported on this platform
+        @test_skip false
+    else
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        njobs = 2
+        io = IOBuffer()
+        ioc = IOContext(io, :color => true)
+        try
+            runtests(ParallelTestRunner, ["--jobs=$(njobs)", "--verbose"];
+                     testsuite, stdout=ioc, stderr=ioc, init_code=:(include($(joinpath(@__DIR__, "utils.jl")))))
+        catch
+            # Show output in case of failure, to help debugging.
+            output = String(take!(io))
+            printstyled(stderr, "Output of failed test >>>>>>>>>>>>>>>>>>>>\n", color=:red, bold=true)
+            println(stderr, output)
+            printstyled(stderr, "End of output <<<<<<<<<<<<<<<<<<<<<<<<<<<<\n", color=:red, bold=true)
+            rethrow()
+        end
+        # Make sure we didn't spawn more workers than expected.
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
+        # Allow a moment for worker processes to exit
+        for _ in 1:50
+            sleep(0.1)
+            after = _count_child_pids()
+            after >= 0 && after <= before && break
+        end
+        after = _count_child_pids()
+        @test after >= 0
+        @test after == before
+    end
+end
+
+# Custom workers are handled differently:
+# <https://github.com/JuliaTesting/ParallelTestRunner.jl/pull/107#issuecomment-3980645143>.
+# But we still want to make sure they're terminated at the end.
+@testset "custom workers stopped at end" begin
+    testsuite = Dict(
+        "a" => :(),
+        "b" => :(),
+        "c" => :(),
+        "d" => :(),
+        "e" => :(),
+        "f" => :(),
+    )
+    procs = Base.Process[]
+    procs_lock = ReentrantLock()
+    function test_worker(name)
+        wrkr = addworker()
+        Base.@lock procs_lock push!(procs, wrkr.w.proc)
+        return wrkr
+    end
+    runtests(ParallelTestRunner, Base.ARGS; test_worker, testsuite, stdout=devnull, stderr=devnull)
+    @test all(!Base.process_running, procs)
 end
 
 end

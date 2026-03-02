@@ -1059,7 +1059,12 @@ function runtests(mod::Module, args::ParsedArgs;
                     Malt.stop(wrkr)
                 end
 
-                delete!(running_tests, test)
+                Base.@lock test_lock begin
+                    delete!(running_tests, test)
+                end
+            end
+            if p !== nothing
+                Malt.stop(p)
             end
         end)
     end
