@@ -789,7 +789,7 @@ function runtests(mod::Module, args::ParsedArgs;
     # determine parallelism
     jobs = something(args.jobs, default_njobs())
     jobs = clamp(jobs, 1, length(tests))
-    println(stdout, "Running $jobs tests in parallel. If this is too many, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
+    println(stdout, "Running $(length(tests)) tests; $jobs in parallel. If this is too many, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
     workers = fill(nothing, jobs)
 
     t0 = time()
