@@ -26,6 +26,24 @@ include(joinpath(@__DIR__, "utils.jl"))
     @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
 end
 
+@testset "debug timing" begin
+    io = IOBuffer()
+    io_color = IOContext(io, :color => true)
+    runtests(ParallelTestRunner, ["--debug-stats"]; stdout=io_color, stderr=io_color)
+    str = String(take!(io))
+
+    @test contains(str, "time (s)")
+
+    @test contains(str, "Available memory:")
+    @test contains(str, "Init")
+
+     # compile time as part of the struct not available before 1.11
+    if VERSION >= v"1.11"
+        @test contains(str, "Compile")
+        @test contains(str, "(%)")
+    end
+end
+
 @testset "default njobs" begin
     @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 28) == 1
     @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 30) == 1
