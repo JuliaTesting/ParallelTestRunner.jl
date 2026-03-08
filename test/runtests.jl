@@ -399,7 +399,7 @@ end
     njobs = 1
     runtests(ParallelTestRunner, ["--jobs=$(njobs)"]; testsuite, stdout=ioc, stderr=ioc)
     str = String(take!(io))
-    @test contains(str, "Running $(length(testsuite)) tests; $(njobs) in parallel")
+    @test contains(str, "Running $(length(testsuite)) tests using $(njobs) parallel jobs")
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
 end
 
