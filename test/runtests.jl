@@ -20,17 +20,10 @@ include(joinpath(@__DIR__, "utils.jl"))
     println("-"^80)
     println()
 
-    @test contains(str, r"basic .+ started at")
     @test contains(str, "SUCCESS")
 
-    @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
-end
-
-@testset "debug timing" begin
-    io = IOBuffer()
-    io_color = IOContext(io, :color => true)
-    runtests(ParallelTestRunner, ["--debug-stats"]; stdout=io_color, stderr=io_color)
-    str = String(take!(io))
+    # --verbose output
+    @test contains(str, r"basic .+ started at")
 
     @test contains(str, "time (s)")
 
@@ -42,6 +35,8 @@ end
         @test contains(str, "Compile")
         @test contains(str, "(%)")
     end
+
+    @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
 end
 
 @testset "default njobs" begin
