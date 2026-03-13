@@ -20,8 +20,21 @@ include(joinpath(@__DIR__, "utils.jl"))
     println("-"^80)
     println()
 
-    @test contains(str, r"basic .+ started at")
     @test contains(str, "SUCCESS")
+
+    # --verbose output
+    @test contains(str, r"basic .+ started at")
+
+    @test contains(str, "time (s)")
+
+    @test contains(str, "Available memory:")
+    @test contains(str, "Init")
+
+     # compile time as part of the struct not available before 1.11
+    if VERSION >= v"1.11"
+        @test contains(str, "Compile")
+        @test contains(str, "(%)")
+    end
 
     @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
 end

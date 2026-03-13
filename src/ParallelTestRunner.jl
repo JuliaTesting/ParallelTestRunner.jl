@@ -86,7 +86,9 @@ struct TestRecord <: AbstractTestRecord
     time::Float64
     bytes::UInt64
     gctime::Float64
+    compile_time::Float64
     rss::UInt64
+    total_time::Float64
 end
 
 function memory_usage(rec::TestRecord)
@@ -106,17 +108,20 @@ struct TestIOContext
     stdout::IO
     stderr::IO
     color::Bool
+    verbose::Bool
     lock::ReentrantLock
     name_align::Int
     elapsed_align::Int
+    compile_align::Int
     gc_align::Int
     percent_align::Int
     alloc_align::Int
     rss_align::Int
 end
 
-function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int)
-    elapsed_align = textwidth("Time (s)")
+function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, verbose::Bool)
+    elapsed_align = textwidth("time (s)")
+    compile_align = textwidth("Compile")
     gc_align = textwidth("GC (s)")
     percent_align = textwidth("GC %")
     alloc_align = textwidth("Alloc (MB)")
@@ -125,7 +130,7 @@ function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align:
     color = get(stdout, :color, false)
 
     return TestIOContext(
-        stdout, stderr, color, lock, name_align, elapsed_align, gc_align, percent_align,
+        stdout, stderr, color, verbose, lock, name_align, elapsed_align, compile_align, gc_align, percent_align,
         alloc_align, rss_align
     )
 end
@@ -133,11 +138,20 @@ end
 function print_header(ctx::TestIOContext, testgroupheader, workerheader)
     lock(ctx.lock)
     try
+        # header top
         printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ")
-        printstyled(ctx.stdout, "         │ ──────────────── CPU ──────────────── │\n", color = :white)
+        printstyled(ctx.stdout, "  Test   │", color = :white)
+        ctx.verbose && printstyled(ctx.stdout, "   Init   │", color = :white)
+        VERSION >= v"1.11" && ctx.verbose && printstyled(ctx.stdout, " Compile │", color = :white)
+        printstyled(ctx.stdout, " ──────────────── CPU ──────────────── │\n", color = :white)
+
+        # header bottom
         printstyled(ctx.stdout, testgroupheader, color = :white)
         printstyled(ctx.stdout, lpad(workerheader, ctx.name_align - textwidth(testgroupheader) + 1), " │ ", color = :white)
-        printstyled(ctx.stdout, "Time (s) │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │\n", color = :white)
+        printstyled(ctx.stdout, "time (s) │", color = :white)
+        ctx.verbose && printstyled(ctx.stdout, " time (s) │", color = :white)
+        VERSION >= v"1.11" && ctx.verbose && printstyled(ctx.stdout, "   (%)   │", color = :white)
+        printstyled(ctx.stdout, " GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │\n", color = :white)
         flush(ctx.stdout)
     finally
         unlock(ctx.lock)
@@ -163,8 +177,21 @@ function print_test_finished(record::TestRecord, wrkr, test, ctx::TestIOContext)
     try
         printstyled(ctx.stdout, test, color = :white)
         printstyled(ctx.stdout, lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │ ", color = :white)
+
         time_str = @sprintf("%7.2f", record.time)
         printstyled(ctx.stdout, lpad(time_str, ctx.elapsed_align, " "), " │ ", color = :white)
+
+        if ctx.verbose
+            # pre-testset time
+            init_time_str = @sprintf("%7.2f", record.total_time - record.time)
+            printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align, " "), " │ ", color = :white)
+
+            # compilation time
+            if VERSION >= v"1.11"
+                init_time_str = @sprintf("%7.2f", Float64(100*record.compile_time/record.time))
+                printstyled(ctx.stdout, lpad(init_time_str, ctx.compile_align, " "), " │ ", color = :white)
+            end
+        end
 
         gc_str = @sprintf("%5.2f", record.gctime)
         printstyled(ctx.stdout, lpad(gc_str, ctx.gc_align, " "), " │ ", color = :white)
@@ -188,14 +215,20 @@ function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
         printstyled(ctx.stderr, test, color = :red)
         printstyled(
             ctx.stderr,
-            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " |"
+            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │"
             , color = :red
         )
+
         time_str = @sprintf("%7.2f", record.time)
         printstyled(ctx.stderr, lpad(time_str, ctx.elapsed_align + 1, " "), " │", color = :red)
 
+        if ctx.verbose
+            init_time_str = @sprintf("%7.2f", record.total_time - record.time)
+            printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align + 1, " "), " │ ", color = :red)
+        end
+
         failed_str = "failed at $(now())\n"
-        # 11 -> 3 from " | " 3x and 2 for each " " on either side
+        # 11 -> 3 from " │ " 3x and 2 for each " " on either side
         fail_align = (11 + ctx.gc_align + ctx.percent_align + ctx.alloc_align + ctx.rss_align - textwidth(failed_str)) ÷ 2 + textwidth(failed_str)
         failed_str = lpad(failed_str, fail_align, " ")
         printstyled(ctx.stderr, failed_str, color = :red)
@@ -214,7 +247,7 @@ function print_test_crashed(wrkr, test, ctx::TestIOContext)
         printstyled(ctx.stderr, test, color = :red)
         printstyled(
             ctx.stderr,
-            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " |",
+            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │",
             " "^ctx.elapsed_align, " crashed at $(now())\n", color = :red
         )
 
@@ -278,7 +311,7 @@ function Test.finish(ts::WorkerTestSet)
     return ts.wrapped_ts
 end
 
-function runtest(f, name, init_code)
+function runtest(f, name, init_code, start_time)
     function inner()
         # generate a temporary module to execute the tests in
         mod = @eval(Main, module $(gensym(name)) end)
@@ -302,12 +335,14 @@ function runtest(f, name, init_code)
                     $f
                 end
             end
-            (; testset=stats.value, stats.time, stats.bytes, stats.gctime)
+
+            compile_time = @static VERSION >= v"1.11" ? stats.compile_time : 0.0
+            (; testset=stats.value, stats.time, stats.bytes, stats.gctime, compile_time)
         end
 
         # process results
         rss = Sys.maxrss()
-        record = TestRecord(data..., rss)
+        record = TestRecord(data..., rss, time() - start_time)
 
         GC.gc(true)
         return record
@@ -790,6 +825,7 @@ function runtests(mod::Module, args::ParsedArgs;
     jobs = something(args.jobs, default_njobs())
     jobs = clamp(jobs, 1, length(tests))
     println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
+    !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
     workers = fill(nothing, jobs)
 
     t0 = time()
@@ -831,7 +867,7 @@ function runtests(mod::Module, args::ParsedArgs;
         stderr.lock = print_lock
     end
 
-    io_ctx = test_IOContext(stdout, stderr, print_lock, name_align)
+    io_ctx = test_IOContext(stdout, stderr, print_lock, name_align, !isnothing(args.verbose))
     print_header(io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
@@ -891,7 +927,7 @@ function runtests(mod::Module, args::ParsedArgs;
 
             eta_sec = est_remaining / jobs
             eta_mins = round(Int, eta_sec / 60)
-            line3 *= " | ETA: ~$eta_mins min"
+            line3 *= " │ ETA: ~$eta_mins min"
         end
 
         # only display the status bar on actual terminals
@@ -1014,7 +1050,7 @@ function runtests(mod::Module, args::ParsedArgs;
                 result = try
                     Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
                     Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
-                                           testsuite[test], test, init_code)
+                                           testsuite[test], test, init_code, test_t0)
                 catch ex
                     if isa(ex, InterruptException)
                         # the worker got interrupted, signal other tasks to stop
