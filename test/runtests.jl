@@ -496,4 +496,297 @@ end
     @test all(!Base.process_running, procs)
 end
 
+# ── Unit tests for internal helpers ──────────────────────────────────────────
+
+@testset "extract_flag!" begin
+    args = ["--verbose", "--jobs=4", "test1"]
+    result = ParallelTestRunner.extract_flag!(args, "--verbose")
+    @test result === Some(nothing)
+    @test args == ["--jobs=4", "test1"]
+
+    args = ["--verbose", "--jobs=4", "test1"]
+    result = ParallelTestRunner.extract_flag!(args, "--jobs"; typ=Int)
+    @test something(result) == 4
+    @test args == ["--verbose", "test1"]
+
+    args = ["--verbose", "test1"]
+    result = ParallelTestRunner.extract_flag!(args, "--jobs")
+    @test result === nothing
+    @test args == ["--verbose", "test1"]
+
+    args = ["--format=json"]
+    result = ParallelTestRunner.extract_flag!(args, "--format")
+    @test something(result) == "json"
+    @test isempty(args)
+end
+
+@testset "parse_args" begin
+    @testset "individual flags" begin
+        args = parse_args(["--verbose"])
+        @test args.verbose !== nothing
+        @test args.jobs === nothing
+        @test args.quickfail === nothing
+        @test args.list === nothing
+        @test isempty(args.positionals)
+
+        args = parse_args(["--jobs=4"])
+        @test something(args.jobs) == 4
+        @test args.verbose === nothing
+
+        args = parse_args(["--quickfail"])
+        @test args.quickfail !== nothing
+        @test args.verbose === nothing
+
+        args = parse_args(["--list"])
+        @test args.list !== nothing
+    end
+
+    @testset "combined flags" begin
+        args = parse_args(["--verbose", "--quickfail", "--jobs=2"])
+        @test args.verbose !== nothing
+        @test args.quickfail !== nothing
+        @test something(args.jobs) == 2
+    end
+
+    @testset "positional arguments" begin
+        args = parse_args(["--verbose", "basic", "subdir"])
+        @test args.verbose !== nothing
+        @test args.positionals == ["basic", "subdir"]
+
+        args = parse_args(["test1", "test2"])
+        @test args.positionals == ["test1", "test2"]
+    end
+
+    @testset "custom arguments" begin
+        args = parse_args(["--gpu", "--nocuda"]; custom=["gpu", "nocuda", "other"])
+        @test args.custom["gpu"] !== nothing
+        @test args.custom["nocuda"] !== nothing
+        @test args.custom["other"] === nothing
+    end
+
+    @testset "unknown flags" begin
+        @test_throws ErrorException parse_args(["--unknown-flag"])
+        @test_throws ErrorException parse_args(["--verbose", "--bogus"])
+    end
+
+    @testset "no arguments" begin
+        args = parse_args(String[])
+        @test args.jobs === nothing
+        @test args.verbose === nothing
+        @test args.quickfail === nothing
+        @test args.list === nothing
+        @test isempty(args.positionals)
+        @test isempty(args.custom)
+    end
+end
+
+@testset "filter_tests!" begin
+    @testset "empty positionals preserves all tests" begin
+        testsuite = Dict("a" => :(), "b" => :(), "c" => :())
+        args = parse_args(String[])
+        @test filter_tests!(testsuite, args) == true
+        @test length(testsuite) == 3
+    end
+
+    @testset "startswith matching" begin
+        testsuite = Dict("basic" => :(), "advanced" => :(), "basic_extra" => :())
+        args = parse_args(["basic"])
+        @test filter_tests!(testsuite, args) == false
+        @test haskey(testsuite, "basic")
+        @test haskey(testsuite, "basic_extra")
+        @test !haskey(testsuite, "advanced")
+    end
+
+    @testset "multiple positional filters" begin
+        testsuite = Dict("unit/a" => :(), "unit/b" => :(), "integration/c" => :(), "perf/d" => :())
+        args = parse_args(["unit", "integration"])
+        @test filter_tests!(testsuite, args) == false
+        @test haskey(testsuite, "unit/a")
+        @test haskey(testsuite, "unit/b")
+        @test haskey(testsuite, "integration/c")
+        @test !haskey(testsuite, "perf/d")
+    end
+
+    @testset "no matches yields empty suite" begin
+        testsuite = Dict("a" => :(), "b" => :())
+        args = parse_args(["nonexistent"])
+        @test filter_tests!(testsuite, args) == false
+        @test isempty(testsuite)
+    end
+end
+
+@testset "find_tests edge cases" begin
+    @testset "empty directory" begin
+        mktempdir() do dir
+            @test isempty(find_tests(dir))
+        end
+    end
+
+    @testset "only runtests.jl" begin
+        mktempdir() do dir
+            write(joinpath(dir, "runtests.jl"), "@test true")
+            @test isempty(find_tests(dir))
+        end
+    end
+
+    @testset "nested subdirectories" begin
+        mktempdir() do dir
+            mkpath(joinpath(dir, "a", "b"))
+            write(joinpath(dir, "test1.jl"), "@test true")
+            write(joinpath(dir, "a", "test2.jl"), "@test true")
+            write(joinpath(dir, "a", "b", "test3.jl"), "@test true")
+            ts = find_tests(dir)
+            @test length(ts) == 3
+            @test haskey(ts, "test1")
+            @test haskey(ts, "a/test2")
+            @test haskey(ts, "a/b/test3")
+        end
+    end
+
+    @testset "non-.jl files ignored" begin
+        mktempdir() do dir
+            write(joinpath(dir, "test.jl"), "@test true")
+            write(joinpath(dir, "readme.md"), "# Readme")
+            write(joinpath(dir, "data.csv"), "1,2,3")
+            ts = find_tests(dir)
+            @test length(ts) == 1
+            @test haskey(ts, "test")
+        end
+    end
+end
+
+@testset "get_max_worker_rss" begin
+    rss = withenv("JULIA_TEST_MAXRSS_MB" => nothing) do
+        ParallelTestRunner.get_max_worker_rss()
+    end
+    @test rss > 0
+
+    rss = withenv("JULIA_TEST_MAXRSS_MB" => "1024") do
+        ParallelTestRunner.get_max_worker_rss()
+    end
+    @test rss == 1024 * 2^20
+end
+
+@testset "test_exe" begin
+    exe = ParallelTestRunner.test_exe(false)
+    @test any(contains("--color=no"), exe.exec)
+    @test any(contains("--project="), exe.exec)
+
+    exe = ParallelTestRunner.test_exe(true)
+    @test any(contains("--color=yes"), exe.exec)
+end
+
+# ── Integration tests ────────────────────────────────────────────────────────
+
+@testset "non-verbose mode" begin
+    testsuite = Dict("quiet" => quote @test true end)
+    io = IOBuffer()
+    runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io)
+    str = String(take!(io))
+    @test !contains(str, "started at")
+    @test !contains(str, "Available memory:")
+    @test contains(str, "SUCCESS")
+end
+
+@testset "quickfail" begin
+    testsuite = Dict(
+        "fail-test" => :( @test false ),
+        "pass-test" => :( @test true ),
+    )
+    io = IOBuffer()
+    @test_throws Test.FallbackTestSetException begin
+        runtests(ParallelTestRunner, ["--quickfail", "--verbose", "--jobs=1"]; testsuite, stdout=io, stderr=io)
+    end
+    str = String(take!(io))
+    @test contains(str, "FAILURE")
+    @test contains(str, "fail-test")
+end
+
+@testset "positional filter end-to-end" begin
+    testsuite = Dict(
+        "unit/math" => :( @test 1 + 1 == 2 ),
+        "unit/string" => :( @test "a" * "b" == "ab" ),
+        "integration/api" => :( @test true ),
+    )
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["unit"]; testsuite, stdout=io, stderr=io)
+    str = String(take!(io))
+    @test contains(str, "Running 2 tests")
+    @test contains(str, "SUCCESS")
+end
+
+@testset "addworkers" begin
+    workers = addworkers(2)
+    @test length(workers) == 2
+    @test all(w -> w isa ParallelTestRunner.PTRWorker, workers)
+    @test all(w -> Base.process_running(w.w.proc), workers)
+    for w in workers
+        ParallelTestRunner.Malt.stop(w)
+    end
+    sleep(0.5)
+    @test all(w -> !Base.process_running(w.w.proc), workers)
+end
+
+@testset "multiple tests multiple jobs" begin
+    testsuite = Dict(
+        "m1" => :( @test 1 + 1 == 2 ),
+        "m2" => :( @test 2 + 2 == 4 ),
+        "m3" => :( @test 3 + 3 == 6 ),
+        "m4" => :( @test 4 + 4 == 8 ),
+    )
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--jobs=2"]; testsuite, stdout=io, stderr=io)
+    str = String(take!(io))
+    @test contains(str, "Running 4 tests using 2 parallel jobs")
+    @test contains(str, "SUCCESS")
+end
+
+@testset "worker RSS recycling" begin
+    testsuite = Dict(
+        "alloc1" => :( @test true ),
+        "alloc2" => :( @test true ),
+        "alloc3" => :( @test true ),
+        "alloc4" => :( @test true ),
+    )
+    io = IOBuffer()
+    old_id_counter = ParallelTestRunner.ID_COUNTER[]
+    runtests(ParallelTestRunner, ["--jobs=1"]; testsuite, stdout=io, stderr=io, max_worker_rss=0)
+    str = String(take!(io))
+    @test contains(str, "SUCCESS")
+    @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + length(testsuite)
+end
+
+@testset "mixed pass and fail" begin
+    testsuite = Dict(
+        "passes" => quote
+            @test true
+            @test 1 + 1 == 2
+        end,
+        "also_passes" => quote
+            @test true
+        end,
+        "fails" => quote
+            @test false
+        end,
+    )
+    io = IOBuffer()
+    @test_throws Test.FallbackTestSetException begin
+        runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io)
+    end
+    str = String(take!(io))
+    @test contains(str, "FAILURE")
+    @test contains(str, "passes")
+    @test contains(str, "also_passes")
+    @test contains(str, "fails")
+end
+
+@testset "empty test suite" begin
+    testsuite = Dict{String,Expr}()
+    io = IOBuffer()
+    runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io)
+    str = String(take!(io))
+    @test contains(str, "Running 0 tests")
+    @test contains(str, "SUCCESS")
+end
+
 end
