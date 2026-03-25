@@ -826,7 +826,11 @@ function runtests(mod::Module, args::ParsedArgs;
     jobs = clamp(jobs, 1, length(tests))
     println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
     !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
-    workers = fill(nothing, jobs)
+    sem = Base.Semaphore(jobs)
+    worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
+    for _ in 1:jobs
+        put!(worker_pool, nothing)
+    end
 
     t0 = time()
     results = []
@@ -887,7 +891,7 @@ function runtests(mod::Module, args::ParsedArgs;
         # only draw if we have something to show
         isempty(running_tests) && return
         completed = length(results)
-        total = completed + length(tests) + length(running_tests)
+        total = length(tests)
 
         # line 1: empty line
         line1 = ""
@@ -921,7 +925,10 @@ function runtests(mod::Module, args::ParsedArgs;
                 est_remaining += max(0.0, duration - elapsed)
             end
             ## yet-to-run
+            completed_names = Set{String}(r[1] for r in results)
             for test in tests
+                haskey(running_tests, test) && continue
+                test in completed_names && continue
                 est_remaining += get(historical_durations, test, est_per_test)
             end
 
@@ -1004,7 +1011,7 @@ function runtests(mod::Module, args::ParsedArgs;
             end
             isa(ex, InterruptException) || rethrow()
         finally
-            if isempty(tests) && isempty(running_tests)
+            if isempty(running_tests) && length(results) >= length(tests)
                 # XXX: only erase the status if we completed successfully.
                 #      in other cases we'll have printed "caught interrupt"
                 clear_status()
@@ -1012,23 +1019,27 @@ function runtests(mod::Module, args::ParsedArgs;
         end
     end
 
-
     #
     # execution
     #
 
-    for p in workers
+    tests_to_start = Threads.Atomic{Int}(length(tests))
+    for test in tests
         push!(worker_tasks, @async begin
-            while !done
-                # get a test to run
-                test, test_t0 = Base.@lock test_lock begin
-                    isempty(tests) && break
-                    test = popfirst!(tests)
+            local p = nothing
+            acquired = false
+            try
+                Base.acquire(sem)
+                acquired = true
+                p = take!(worker_pool)
+                Threads.atomic_sub!(tests_to_start, 1)
 
+                done && return
+
+                test_t0 = Base.@lock test_lock begin
                     test_t0 = time()
                     running_tests[test] = test_t0
-
-                    test, test_t0
+                    test_t0
                 end
 
                 # pass in init_worker_code to custom worker function if defined
@@ -1055,7 +1066,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     if isa(ex, InterruptException)
                         # the worker got interrupted, signal other tasks to stop
                         stop_work()
-                        break
+                        return
                     end
 
                     ex
@@ -1069,7 +1080,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     put!(printer_channel, (:finished, test, worker_id(wrkr), result))
                     if anynonpass(result[]) && args.quickfail !== nothing
                         stop_work()
-                        break
+                        return
                     end
 
                     if memory_usage(result) > max_worker_rss
@@ -1083,7 +1094,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     put!(printer_channel, (:crashed, test, worker_id(wrkr)))
                     if args.quickfail !== nothing
                         stop_work()
-                        break
+                        return
                     end
 
                     # the worker encountered some serious failure, recycle it
@@ -1098,13 +1109,21 @@ function runtests(mod::Module, args::ParsedArgs;
                 Base.@lock test_lock begin
                     delete!(running_tests, test)
                 end
-            end
-            if p !== nothing
-                Malt.stop(p)
+            catch ex
+                isa(ex, InterruptException) || rethrow()
+            finally
+                if acquired
+                    # stop the worker if no more tests will need one from the pool
+                    if tests_to_start[] == 0 && p !== nothing && Malt.isrunning(p)
+                        Malt.stop(p)
+                        p = nothing
+                    end
+                    put!(worker_pool, p)
+                    Base.release(sem)
+                end
             end
         end)
     end
-
 
     #
     # finalization
@@ -1116,7 +1135,7 @@ function runtests(mod::Module, args::ParsedArgs;
             if any(istaskfailed, worker_tasks)
                 println(io_ctx.stderr, "\nCaught an error, stopping...")
                 break
-            elseif done || Base.@lock(test_lock, isempty(tests) && isempty(running_tests))
+            elseif done || Base.@lock(test_lock, isempty(running_tests) && length(results) >= length(tests))
                 break
             end
             sleep(1)
@@ -1143,6 +1162,14 @@ function runtests(mod::Module, args::ParsedArgs;
             end
 
             isa(err, InterruptException) || rethrow()
+        end
+    end
+
+    # clean up remaining workers in the pool
+    close(worker_pool)
+    for p in worker_pool
+        if p !== nothing && Malt.isrunning(p)
+            Malt.stop(p)
         end
     end
 
@@ -1227,7 +1254,7 @@ function runtests(mod::Module, args::ParsedArgs;
             end
 
             # mark remaining or running tests as interrupted
-            for test in [tests; collect(keys(running_tests))]
+            for test in tests
                 (test in completed_tests) && continue
                 testset = create_testset(test)
                 Test.record(testset, Test.Error(:test_interrupted, test, nothing, Base.ExceptionStack(NamedTuple[(;exception = "skipped", backtrace = [])]), LineNumberNode(1)))
