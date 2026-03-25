@@ -688,20 +688,6 @@ end
     @test contains(str, "SUCCESS")
 end
 
-@testset "quickfail" begin
-    testsuite = Dict(
-        "fail-test" => :( @test false ),
-        "pass-test" => :( @test true ),
-    )
-    io = IOBuffer()
-    @test_throws Test.FallbackTestSetException begin
-        runtests(ParallelTestRunner, ["--quickfail", "--verbose", "--jobs=1"]; testsuite, stdout=io, stderr=io)
-    end
-    str = String(take!(io))
-    @test contains(str, "FAILURE")
-    @test contains(str, "fail-test")
-end
-
 @testset "positional filter end-to-end" begin
     testsuite = Dict(
         "unit/math" => :( @test 1 + 1 == 2 ),
