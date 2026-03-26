@@ -834,6 +834,7 @@ function runtests(mod::Module, args::ParsedArgs;
     results = []
     running_tests = Dict{String, Float64}()  # test => start_time
     test_lock = ReentrantLock() # to protect crucial access to tests and running_tests
+    results_lock = ReentrantLock() # to protect concurrent access to results
 
     worker_tasks = Task[]
 
@@ -888,7 +889,7 @@ function runtests(mod::Module, args::ParsedArgs;
     function update_status()
         # only draw if we have something to show
         isempty(running_tests) && return
-        completed = length(results)
+        completed = Base.@lock results_lock length(results)
         total = completed + length(tests) + length(running_tests)
 
         # line 1: empty line
@@ -910,7 +911,7 @@ function runtests(mod::Module, args::ParsedArgs;
         line3 = "Progress: $completed/$total tests completed"
         if completed > 0
             # estimate per-test time (slightly pessimistic)
-            durations_done = [end_time - start_time for (_, _,_, start_time, end_time) in results]
+            durations_done = Base.@lock results_lock [end_time - start_time for (_, _,_, start_time, end_time) in results]
             μ = mean(durations_done)
             σ = length(durations_done) > 1 ? std(durations_done) : 0.0
             est_per_test = μ + 0.5σ
@@ -1063,8 +1064,8 @@ function runtests(mod::Module, args::ParsedArgs;
                     ex
                 end
                 test_t1 = time()
-                output = @lock wrkr.io_lock String(take!(wrkr.io))
-                push!(results, (test, result, output, test_t0, test_t1))
+                output = Base.@lock wrkr.io_lock String(take!(wrkr.io))
+                Base.@lock results_lock push!(results, (test, result, output, test_t0, test_t1))
 
                 # act on the results
                 if result isa AbstractTestRecord
