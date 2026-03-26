@@ -311,6 +311,33 @@ end
     @test contains(str, "Malt.TerminatedWorkerException")
 end
 
+@testset "worker task failure detected by monitor" begin
+    testsuite = Dict(
+        "a" => :( @test true ),
+    )
+
+    exception = ErrorException("test_worker exploded")
+    # A bad test_worker will cause the worker task to error out.  With this test
+    # we want to make sure the task monitoring system catches and handles it.
+    test_worker(name) = throw(exception)
+
+    io = IOBuffer()
+    try
+        runtests(ParallelTestRunner, ["--jobs=1"];
+                 test_worker, testsuite, stdout=io, stderr=io)
+        # The `runtests` above should handle the error, so we shouldn't get here
+        @test false
+    catch e
+        @test typeof(e) === TaskFailedException
+        @test first(Base.current_exceptions(e.task)).exception == exception
+    end
+    str = String(take!(io))
+    @test contains(str, "Caught an error, stopping...")
+    @test !contains(str, "SUCCESS")
+    # Not even FAILURE is printed in this case, we exit very early.
+    @test !contains(str, "FAILURE")
+end
+
 @testset "test output" begin
     msg = "This is some output from the test"
     testsuite = Dict(
