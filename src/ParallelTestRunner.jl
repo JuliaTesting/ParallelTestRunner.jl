@@ -889,7 +889,7 @@ function runtests(mod::Module, args::ParsedArgs;
     function update_status()
         # only draw if we have something to show
         isempty(running_tests) && return
-        completed = length(results)
+        completed = Base.@lock results_lock length(results)
         total = completed + length(tests) + length(running_tests)
 
         # line 1: empty line
@@ -911,7 +911,7 @@ function runtests(mod::Module, args::ParsedArgs;
         line3 = "Progress: $completed/$total tests completed"
         if completed > 0
             # estimate per-test time (slightly pessimistic)
-            durations_done = [end_time - start_time for (_, _,_, start_time, end_time) in results]
+            durations_done = Base.@lock results_lock [end_time - start_time for (_, _,_, start_time, end_time) in results]
             μ = mean(durations_done)
             σ = length(durations_done) > 1 ? std(durations_done) : 0.0
             est_per_test = μ + 0.5σ
