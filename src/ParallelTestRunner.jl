@@ -925,10 +925,10 @@ function runtests(mod::Module, args::ParsedArgs;
                 est_remaining += max(0.0, duration - elapsed)
             end
             ## yet-to-run
-            completed_names = Set{String}(r[1] for r in results)
             for test in tests
                 haskey(running_tests, test) && continue
-                test in completed_names && continue
+                # Test is in any completed test
+                any(r -> test == r.test, results) && continue
                 est_remaining += get(historical_durations, test, est_per_test)
             end
 
@@ -1072,7 +1072,7 @@ function runtests(mod::Module, args::ParsedArgs;
                 end
                 test_t1 = time()
                 output = String(take!(wrkr.io))
-                push!(results, (test, result, output, test_t0, test_t1))
+                push!(results, (; test, result, output, test_t0, test_t1))
 
                 # act on the results
                 if result isa AbstractTestRecord
