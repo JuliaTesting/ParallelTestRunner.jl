@@ -836,6 +836,7 @@ function runtests(mod::Module, args::ParsedArgs;
     results = []
     running_tests = Dict{String, Float64}()  # test => start_time
     test_lock = ReentrantLock() # to protect crucial access to tests and running_tests
+    results_lock = ReentrantLock() # to protect concurrent access to results
 
     worker_tasks = Task[]
 
@@ -1072,7 +1073,7 @@ function runtests(mod::Module, args::ParsedArgs;
                 end
                 test_t1 = time()
                 output = String(take!(wrkr.io))
-                push!(results, (; test, result, output, test_t0, test_t1))
+                Base.@lock results_lock push!(results, (; test, result, output, test_t0, test_t1))
 
                 # act on the results
                 if result isa AbstractTestRecord
