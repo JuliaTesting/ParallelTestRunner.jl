@@ -1024,8 +1024,8 @@ function runtests(mod::Module, args::ParsedArgs;
     #
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
-    for test in tests
-        push!(worker_tasks, @async begin
+    @sync for test in tests
+        push!(worker_tasks, Threads.@spawn begin
             local p = nothing
             acquired = false
             try
