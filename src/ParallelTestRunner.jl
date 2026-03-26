@@ -1039,7 +1039,6 @@ function runtests(mod::Module, args::ParsedArgs;
                 test_t0 = Base.@lock test_lock begin
                     test_t0 = time()
                     running_tests[test] = test_t0
-                    test_t0
                 end
 
                 # pass in init_worker_code to custom worker function if defined
