@@ -29,15 +29,17 @@ const ID_COUNTER = Threads.Atomic{Int}(0)
 struct PTRWorker <: Malt.AbstractWorker
     w::Malt.Worker
     io::IOBuffer
+    io_lock::ReentrantLock
     id::Int
 end
 
 function PTRWorker(; exename=Base.julia_cmd()[1], exeflags=String[], env=String[])
     io = IOBuffer()
+    io_lock = ReentrantLock()
     wrkr = Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false)
-    stdio_loop(wrkr, io)
+    stdio_loop(wrkr, io, io_lock)
     id = ID_COUNTER[] += 1
-    return PTRWorker(wrkr, io, id)
+    return PTRWorker(wrkr, io, io_lock, id)
 end
 
 worker_id(wrkr::PTRWorker) = wrkr.id
@@ -258,11 +260,11 @@ function print_test_crashed(wrkr, test, ctx::TestIOContext)
 end
 
 # Adapted from `Malt._stdio_loop`
-function stdio_loop(worker::Malt.Worker, io)
+function stdio_loop(worker::Malt.Worker, io, io_lock::ReentrantLock)
     Threads.@spawn while !eof(worker.stdout) && Malt.isrunning(worker)
         try
             bytes = readavailable(worker.stdout)
-            write(io, bytes)
+            @lock io_lock write(io, bytes)
         catch
             break
         end
@@ -270,7 +272,7 @@ function stdio_loop(worker::Malt.Worker, io)
     Threads.@spawn while !eof(worker.stderr) && Malt.isrunning(worker)
         try
             bytes = readavailable(worker.stderr)
-            write(io, bytes)
+            @lock io_lock write(io, bytes)
         catch
             break
         end
@@ -1072,7 +1074,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     ex
                 end
                 test_t1 = time()
-                output = String(take!(wrkr.io))
+                output = Base.@lock  wrkr.io_lock String(take!(wrkr.io))
                 Base.@lock results_lock push!(results, (; test, result, output, test_t0, test_t1))
 
                 # act on the results
