@@ -849,12 +849,15 @@ end
             end,
         )
         io = IOBuffer()
-        runtests(ParallelTestRunner, ["--jobs=2", "--verbose"];
+        jobs = 2
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        runtests(ParallelTestRunner, ["--jobs=$(jobs)", "--verbose"];
                  testsuite, stdout=io, stderr=io,
                  serial=["serial_a", "serial_b"])
         str = String(take!(io))
         @test contains(str, "2 serial test(s) will run before")
         @test contains(str, "SUCCESS")
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + jobs
     end
 
     @testset "serial tests run after parallel" begin
@@ -902,8 +905,10 @@ end
         )
         io = IOBuffer()
         ioc = IOContext(io, :color => true)
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        jobs = 2
         elapsed = try
-            @elapsed runtests(ParallelTestRunner, ["--jobs=2", "--verbose"];
+            @elapsed runtests(ParallelTestRunner, ["--jobs=$(jobs)", "--verbose"];
                               testsuite, stdout=ioc, stderr=ioc,
                               init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
                               serial=["s1", "s2", "s3"])
@@ -917,6 +922,7 @@ end
         end
         str = String(take!(io))
         @test contains(str, "SUCCESS")
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + jobs
         # Serial tests sleeping 1.0s each should take >= 3s total (sequential),
         # not ~1.0s (parallel).
         @test elapsed >= 3.0
