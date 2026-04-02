@@ -802,4 +802,140 @@ end
     @test contains(str, "SUCCESS")
 end
 
+# ── Serial tests ─────────────────────────────────────────────────────────────
+
+@testset "partition_tests" begin
+    @testset "basic partitioning preserves order" begin
+        tests = ["a", "b", "c", "d", "e"]
+        serial, parallel = partition_tests(tests, ["c", "a"])
+        @test serial == ["a", "c"]
+        @test parallel == ["b", "d", "e"]
+    end
+
+    @testset "empty serial list" begin
+        tests = ["x", "y", "z"]
+        serial, parallel = partition_tests(tests, String[])
+        @test isempty(serial)
+        @test parallel == tests
+    end
+
+    @testset "all tests serial" begin
+        tests = ["a", "b"]
+        serial, parallel = partition_tests(tests, ["a", "b"])
+        @test serial == ["a", "b"]
+        @test isempty(parallel)
+    end
+
+    @testset "unknown serial name throws" begin
+        tests = ["a", "b"]
+        @test_throws ArgumentError partition_tests(tests, ["a", "missing"])
+    end
+end
+
+@testset "serial tests run before parallel (default)" begin
+    testsuite = Dict(
+        "serial_a" => quote
+            @test true
+        end,
+        "serial_b" => quote
+            @test true
+        end,
+        "parallel_1" => quote
+            @test true
+        end,
+        "parallel_2" => quote
+            @test true
+        end,
+    )
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--jobs=2", "--verbose"];
+             testsuite, stdout=io, stderr=io,
+             serial=["serial_a", "serial_b"])
+    str = String(take!(io))
+    @test contains(str, "2 serial test(s) will run before")
+    @test contains(str, "SUCCESS")
+end
+
+@testset "serial tests run after parallel" begin
+    testsuite = Dict(
+        "serial_x" => quote
+            @test true
+        end,
+        "parallel_y" => quote
+            @test true
+        end,
+    )
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--jobs=2", "--verbose"];
+             testsuite, stdout=io, stderr=io,
+             serial=["serial_x"], serial_position=:after)
+    str = String(take!(io))
+    @test contains(str, "1 serial test(s) will run after")
+    @test contains(str, "SUCCESS")
+end
+
+@testset "serial_position validation" begin
+    testsuite = Dict("a" => :(@test true))
+    io = IOBuffer()
+    @test_throws ArgumentError runtests(ParallelTestRunner, String[];
+                                        testsuite, stdout=io, stderr=io,
+                                        serial_position=:middle)
+end
+
+@testset "serial tests actually run sequentially" begin
+    testsuite = Dict(
+        "s1" => quote
+            sleep(0.5)
+            @test true
+        end,
+        "s2" => quote
+            sleep(0.5)
+            @test true
+        end,
+        "p1" => quote
+            @test true
+        end,
+    )
+    io = IOBuffer()
+    ioc = IOContext(io, :color => true)
+    t0 = time()
+    runtests(ParallelTestRunner, ["--jobs=4", "--verbose"];
+             testsuite, stdout=ioc, stderr=ioc,
+             serial=["s1", "s2"])
+    elapsed = time() - t0
+    str = String(take!(io))
+    @test contains(str, "SUCCESS")
+    # Serial tests sleeping 0.5s each should take >= 1s total (sequential),
+    # not ~0.5s (parallel). Allow some slack for worker startup.
+    @test elapsed >= 0.8
+end
+
+@testset "empty serial list is a no-op" begin
+    testsuite = Dict(
+        "a" => :(@test true),
+        "b" => :(@test true),
+    )
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--jobs=2"]; testsuite, stdout=io, stderr=io,
+             serial=String[])
+    str = String(take!(io))
+    @test !contains(str, "serial")
+    @test contains(str, "SUCCESS")
+end
+
+@testset "serial names filtered by positional args" begin
+    testsuite = Dict(
+        "unit/a" => :(@test true),
+        "unit/b" => :(@test true),
+        "integration/c" => :(@test true),
+    )
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["unit"]; testsuite, stdout=io, stderr=io,
+             serial=["unit/a", "integration/c"])
+    str = String(take!(io))
+    @test contains(str, "Running 2 tests")
+    @test contains(str, "1 serial test(s)")
+    @test contains(str, "SUCCESS")
+end
+
 end
