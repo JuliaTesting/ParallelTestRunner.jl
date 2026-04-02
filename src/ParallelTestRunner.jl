@@ -1,6 +1,6 @@
 module ParallelTestRunner
 
-export runtests, addworkers, addworker, find_tests, parse_args, filter_tests!, partition_tests
+export runtests, addworkers, addworker, find_tests, parse_args, filter_tests!
 
 using Malt
 using Dates
@@ -869,6 +869,10 @@ function runtests(mod::Module, args::ParsedArgs;
     # determine parallelism
     jobs = something(args.jobs, default_njobs())
     jobs = clamp(jobs, 1, length(tests))
+    worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
+    for _ in 1:jobs
+        put!(worker_pool, nothing)
+    end
     println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
     if !isempty(serial_tests)
         println(stdout, "  $(length(serial_tests)) serial test(s) will run $(serial_position) the parallel batch.")
@@ -882,6 +886,12 @@ function runtests(mod::Module, args::ParsedArgs;
     results_lock = ReentrantLock() # to protect concurrent access to results
 
     worker_tasks = Task[]
+
+    tests_semaphores = if serial_position === :before
+        ((serial_tests, Base.Semaphore(1)), (parallel_tests, Base.Semaphore(max(1, jobs))))
+    else
+        ((parallel_tests, Base.Semaphore(max(1, jobs))), (serial_tests, Base.Semaphore(1)))
+    end
 
     done = false
     function stop_work()
@@ -1067,139 +1077,112 @@ function runtests(mod::Module, args::ParsedArgs;
     # execution
     #
 
-    function run_phase(phase_tests, phase_jobs)
-        isempty(phase_tests) && return
-        done && return
-
-        phase_sem = Base.Semaphore(max(1, phase_jobs))
-        phase_pool = Channel{Union{Nothing, PTRWorker}}(phase_jobs)
-        for _ in 1:phase_jobs
-            put!(phase_pool, nothing)
-        end
-        phase_remaining = Threads.Atomic{Int}(length(phase_tests))
-
-        try
-            @sync for test in phase_tests
-                push!(worker_tasks, Threads.@spawn begin
-                    local p = nothing
-                    acquired = false
-                    try
-                        Base.acquire(phase_sem)
-                        acquired = true
-                        p = take!(phase_pool)
-                        Threads.atomic_sub!(phase_remaining, 1)
-
-                        done && return
-
-                        test_t0 = Base.@lock test_lock begin
-                            test_t0 = time()
-                            running_tests[test] = test_t0
-                        end
-
-                        # pass in init_worker_code to custom worker function if defined
-                        wrkr = if init_worker_code == :()
-                            test_worker(test)
-                        else
-                            test_worker(test, init_worker_code)
-                        end
-                        if wrkr === nothing
-                            wrkr = p
-                        end
-                        # if a worker failed, spawn a new one
-                        if wrkr === nothing || !Malt.isrunning(wrkr)
-                            wrkr = p = addworker(; init_worker_code, io_ctx.color)
-                        end
-
-                        # run the test
-                        put!(printer_channel, (:started, test, worker_id(wrkr)))
-                        result = try
-                            Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
-                            Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
-                                                   testsuite[test], test, init_code, test_t0)
-                        catch ex
-                            if isa(ex, InterruptException)
-                                # the worker got interrupted, signal other tasks to stop
-                                stop_work()
-                                return
-                            end
-
-                            ex
-                        end
-                        test_t1 = time()
-                        output = Base.@lock wrkr.io_lock String(take!(wrkr.io))
-                        Base.@lock results_lock push!(results, (; test, result, output, test_t0, test_t1))
-
-                        # act on the results
-                        if result isa AbstractTestRecord
-                            put!(printer_channel, (:finished, test, worker_id(wrkr), result))
-                            if anynonpass(result[]) && args.quickfail !== nothing
-                                stop_work()
-                                return
-                            end
-
-                            if memory_usage(result) > max_worker_rss
-                                # the worker has reached the max-rss limit, recycle it
-                                # so future tests start with a smaller working set
-                                Malt.stop(wrkr)
-                            end
-                        else
-                            # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
-                            @assert result isa Exception
-                            put!(printer_channel, (:crashed, test, worker_id(wrkr)))
-                            if args.quickfail !== nothing
-                                stop_work()
-                                return
-                            end
-
-                            # the worker encountered some serious failure, recycle it
-                            Malt.stop(wrkr)
-                        end
-
-                        # get rid of the custom worker
-                        if wrkr != p
-                            Malt.stop(wrkr)
-                        end
-
-                        Base.@lock test_lock begin
-                            delete!(running_tests, test)
-                        end
-                    catch ex
-                        isa(ex, InterruptException) || rethrow()
-                    finally
-                        if acquired
-                            # stop the worker if no more tests will need one from the pool
-                            if phase_remaining[] == 0 && p !== nothing && Malt.isrunning(p)
-                                Malt.stop(p)
-                                p = nothing
-                            end
-                            put!(phase_pool, p)
-                            Base.release(phase_sem)
-                        end
-                    end
-                end)
-            end
-        catch err
-            if !(err isa InterruptException)
-                println(io_ctx.stderr, "\nCaught an error, stopping...")
-            end
-        end
-
-        # clean up remaining workers in this phase's pool
-        close(phase_pool)
-        for p in phase_pool
-            if p !== nothing && Malt.isrunning(p)
-                Malt.stop(p)
-            end
-        end
-    end
-
+    tests_to_start = Threads.Atomic{Int}(length(tests))
     try
-        if serial_position == :before
-            run_phase(serial_tests, 1)
-            run_phase(parallel_tests, jobs)
-        else
-            run_phase(parallel_tests, jobs)
-            run_phase(serial_tests, 1)
+        for (tests, sem) in tests_semaphores
+            @sync for test in tests
+                push!(worker_tasks, Threads.@spawn begin
+                          local p = nothing
+                          acquired = false
+                          try
+                              Base.acquire(sem)
+                              acquired = true
+                              p = take!(worker_pool)
+                              Threads.atomic_sub!(tests_to_start, 1)
+
+                              done && return
+
+                              test_t0 = Base.@lock test_lock begin
+                                  test_t0 = time()
+                                  running_tests[test] = test_t0
+                              end
+
+                              # pass in init_worker_code to custom worker function if defined
+                              wrkr = if init_worker_code == :()
+                                  test_worker(test)
+                              else
+                                  test_worker(test, init_worker_code)
+                              end
+                              if wrkr === nothing
+                                  wrkr = p
+                              end
+                              # if a worker failed, spawn a new one
+                              if wrkr === nothing || !Malt.isrunning(wrkr)
+                                  wrkr = p = addworker(; init_worker_code, io_ctx.color)
+                              end
+
+                              # run the test
+                              put!(printer_channel, (:started, test, worker_id(wrkr)))
+                              result = try
+                                  Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
+                                  Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
+                                                         testsuite[test], test, init_code, test_t0)
+                              catch ex
+                                  if isa(ex, InterruptException)
+                                      # the worker got interrupted, signal other tasks to stop
+                                      stop_work()
+                                      return
+                                  end
+
+                                  ex
+                              end
+                              test_t1 = time()
+                              output = Base.@lock wrkr.io_lock String(take!(wrkr.io))
+                              Base.@lock results_lock push!(results, (; test, result, output, test_t0, test_t1))
+
+                              # act on the results
+                              if result isa AbstractTestRecord
+                                  put!(printer_channel, (:finished, test, worker_id(wrkr), result))
+                                  if anynonpass(result[]) && args.quickfail !== nothing
+                                      stop_work()
+                                      return
+                                  end
+
+                                  if memory_usage(result) > max_worker_rss
+                                      # the worker has reached the max-rss limit, recycle it
+                                      # so future tests start with a smaller working set
+                                      Malt.stop(wrkr)
+                                  end
+                              else
+                                  # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
+                                  @assert result isa Exception
+                                  put!(printer_channel, (:crashed, test, worker_id(wrkr)))
+                                  if args.quickfail !== nothing
+                                      stop_work()
+                                      return
+                                  end
+
+                                  # the worker encountered some serious failure, recycle it
+                                  Malt.stop(wrkr)
+                              end
+
+                              # get rid of the custom worker
+                              if wrkr != p
+                                  Malt.stop(wrkr)
+                              end
+
+                              Base.@lock test_lock begin
+                                  delete!(running_tests, test)
+                              end
+                          catch ex
+                              isa(ex, InterruptException) || rethrow()
+                          finally
+                              if acquired
+                                  # stop the worker if no more tests will need one from the pool
+                                  if tests_to_start[] == 0 && p !== nothing && Malt.isrunning(p)
+                                      Malt.stop(p)
+                                      p = nothing
+                                  end
+                                  put!(worker_pool, p)
+                                  Base.release(sem)
+                              end
+                          end
+                      end)
+            end
+        end
+    catch err
+        if !(err isa InterruptException)
+            println(io_ctx.stderr, "\nCaught an error, stopping...")
         end
     finally
         stop_work()
@@ -1224,6 +1207,14 @@ function runtests(mod::Module, args::ParsedArgs;
             end
 
             isa(err, InterruptException) || rethrow()
+        end
+    end
+
+    # clean up remaining workers in the pool
+    close(worker_pool)
+    for p in worker_pool
+        if p !== nothing && Malt.isrunning(p)
+            Malt.stop(p)
         end
     end
 

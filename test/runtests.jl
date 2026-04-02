@@ -808,28 +808,28 @@ end
     @testset "partition_tests" begin
         @testset "basic partitioning preserves order" begin
             tests = ["a", "b", "c", "d", "e"]
-            serial, parallel = partition_tests(tests, ["c", "a"])
+            serial, parallel = ParallelTestRunner.partition_tests(tests, ["c", "a"])
             @test serial == ["a", "c"]
             @test parallel == ["b", "d", "e"]
         end
 
         @testset "empty serial list" begin
             tests = ["x", "y", "z"]
-            serial, parallel = partition_tests(tests, String[])
+            serial, parallel = ParallelTestRunner.partition_tests(tests, String[])
             @test isempty(serial)
             @test parallel == tests
         end
 
         @testset "all tests serial" begin
             tests = ["a", "b"]
-            serial, parallel = partition_tests(tests, ["a", "b"])
+            serial, parallel = ParallelTestRunner.partition_tests(tests, ["a", "b"])
             @test serial == ["a", "b"]
             @test isempty(parallel)
         end
 
         @testset "unknown serial name throws" begin
             tests = ["a", "b"]
-            @test_throws ArgumentError partition_tests(tests, ["a", "missing"])
+            @test_throws ArgumentError ParallelTestRunner.partition_tests(tests, ["a", "missing"])
         end
     end
 
