@@ -153,14 +153,14 @@ testsuite = Dict(
 )
 
 # "big_alloc" and "huge_matrix" run one at a time; the rest run in parallel
-runtests(MyPackage, ARGS; testsuite, serial=["big_alloc", "huge_matrix"])
+runtests(MyPackage, ["--verbose"]; testsuite, serial=["big_alloc", "huge_matrix"])
 ```
 
 By default serial tests run **before** the parallel batch.
 Use `serial_position=:after` to run them after instead:
 
 ```@example mypackage
-runtests(MyPackage, ARGS; testsuite, serial=["big_alloc", "huge_matrix"], serial_position=:after)
+runtests(MyPackage, ["--verbose"]; testsuite, serial=["big_alloc", "huge_matrix"], serial_position=:after)
 ```
 
 Serial tests participate in the same ordering logic as parallel tests (sorted by historical
