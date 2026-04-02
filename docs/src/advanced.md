@@ -127,6 +127,53 @@ end # hide
 ```
 The `init_worker_code` is evaluated once per worker, so all definitions can be imported for use by the test module.
 
+## Serial Tests
+
+Some tests cannot safely run in parallel with other tests — for example, tests that allocate very large arrays and would exhaust memory if multiple ran simultaneously.
+The `serial` keyword argument to [`runtests`](@ref) lets you designate specific tests to run one at a time, while the remaining tests still run in parallel.
+
+```@example mypackage
+using ParallelTestRunner
+using MyPackage
+
+testsuite = Dict(
+    "big_alloc" => quote
+        # This test allocates ~4 GB and should not overlap with other tests
+        @test true
+    end,
+    "huge_matrix" => quote
+        @test true
+    end,
+    "fast_unit" => quote
+        @test 1 + 1 == 2
+    end,
+    "fast_integration" => quote
+        @test true
+    end,
+)
+
+# "big_alloc" and "huge_matrix" run one at a time; the rest run in parallel
+runtests(MyPackage, ARGS; testsuite, serial=["big_alloc", "huge_matrix"])
+```
+
+By default serial tests run **before** the parallel batch.
+Use `serial_position=:after` to run them after instead:
+
+```@example mypackage
+runtests(MyPackage, ARGS; testsuite, serial=["big_alloc", "huge_matrix"], serial_position=:after)
+```
+
+Serial tests participate in the same ordering logic as parallel tests (sorted by historical
+duration, longest first) and their results appear in the same overall summary.
+
+!!! tip
+    With automatic test discovery via [`find_tests`](@ref), the `serial` names are the same
+    keys that appear in the testsuite dictionary (e.g. `"subdir/memory_test"`).
+
+!!! note
+    If the user filters tests via positional arguments (e.g. `julia test/runtests.jl unit`),
+    any serial test names that were filtered out are silently removed from the serial list.
+
 ## Custom Workers
 
 For tests that require specific environment variables or Julia flags, you can use the `test_worker` keyword argument to [`runtests`](@ref) to assign tests to custom workers:
@@ -254,3 +301,5 @@ function jltest {
    Having few long-running test files and other short-running ones hinders scalability.
 
 1. **Use custom workers sparingly**: Custom workers add overhead. Only use them when tests genuinely require different configurations.
+
+1. **Use `serial` for resource-intensive tests**: If a test allocates significant memory or uses exclusive hardware resources, mark it as serial rather than reducing `--jobs` globally. This keeps the rest of your suite running in parallel.
