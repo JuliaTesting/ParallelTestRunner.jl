@@ -887,10 +887,14 @@ function runtests(mod::Module, args::ParsedArgs;
 
     worker_tasks = Task[]
 
-    tests_semaphores = if serial_position === :before
-        ((serial_tests, Base.Semaphore(1)), (parallel_tests, Base.Semaphore(max(1, jobs))))
+    serial_worker = Ref{Union{Nothing, PTRWorker}}(nothing)
+
+    test_phases = if serial_position === :before
+        ((serial_tests, Base.Semaphore(1), serial_worker),
+         (parallel_tests, Base.Semaphore(max(1, jobs)), nothing))
     else
-        ((parallel_tests, Base.Semaphore(max(1, jobs))), (serial_tests, Base.Semaphore(1)))
+        ((parallel_tests, Base.Semaphore(max(1, jobs)), nothing),
+         (serial_tests, Base.Semaphore(1), serial_worker))
     end
 
     done = false
@@ -1079,15 +1083,20 @@ function runtests(mod::Module, args::ParsedArgs;
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
     try
-        for (tests, sem) in tests_semaphores
-            @sync for test in tests
+        for (phase_tests, sem, shared_worker) in test_phases
+            isempty(phase_tests) && continue
+            # for serial phases, reserve one pool slot for the shared worker
+            if !isnothing(shared_worker)
+                shared_worker[] = take!(worker_pool)
+            end
+            @sync for test in phase_tests
                 push!(worker_tasks, Threads.@spawn begin
                           local p = nothing
                           acquired = false
                           try
                               Base.acquire(sem)
                               acquired = true
-                              p = take!(worker_pool)
+                              p = !isnothing(shared_worker) ? shared_worker[] : take!(worker_pool)
                               Threads.atomic_sub!(tests_to_start, 1)
 
                               done && return
@@ -1168,16 +1177,25 @@ function runtests(mod::Module, args::ParsedArgs;
                               isa(ex, InterruptException) || rethrow()
                           finally
                               if acquired
-                                  # stop the worker if no more tests will need one from the pool
-                                  if tests_to_start[] == 0 && p !== nothing && Malt.isrunning(p)
-                                      Malt.stop(p)
-                                      p = nothing
+                                  if !isnothing(shared_worker)
+                                      shared_worker[] = p
+                                  else
+                                      # stop the worker if no more tests will need one from the pool
+                                      if tests_to_start[] == 0 && p !== nothing && Malt.isrunning(p)
+                                          Malt.stop(p)
+                                          p = nothing
+                                      end
+                                      put!(worker_pool, p)
                                   end
-                                  put!(worker_pool, p)
                                   Base.release(sem)
                               end
                           end
                       end)
+            end
+            # return the serial worker to the pool for potential reuse
+            if !isnothing(shared_worker)
+                put!(worker_pool, shared_worker[])
+                shared_worker[] = nothing
             end
         end
     catch err
