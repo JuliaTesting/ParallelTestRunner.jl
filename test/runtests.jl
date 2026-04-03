@@ -890,18 +890,19 @@ end
         serial_test_body = quote
             sleep(1.0)
             @test true
+            children = _count_child_pids($(getpid()))
+            # Make sure serial tests run alone.
+            if children >= 0
+                @test children == 1
+            end
         end
 
         testsuite = Dict(
             "s1" => serial_test_body,
             "s2" => serial_test_body,
             "s3" => serial_test_body,
-            "p1" => quote
-                @test true
-            end,
-            "p2" => quote
-                @test true
-            end,
+            "p1" => :( @test true ),
+            "p2" => :( @test true ),
         )
         io = IOBuffer()
         ioc = IOContext(io, :color => true)
@@ -994,6 +995,42 @@ end
         @test contains(str, "1 serial test(s)")
         @test contains(str, "SUCCESS")
     end
+
+    @testset "crashing serial test" begin
+        serial_test_body = quote
+            children = _count_child_pids($(getpid()))
+            # Make sure serial tests run alone.
+            if children >= 0
+                @test children == 1
+            end
+        end
+
+        testsuite = Dict(
+            "s1" => serial_test_body,
+            "s2" => serial_test_body,
+            "s3" => serial_test_body,
+            "s4" => :(ccall(:abort, Nothing, ())),
+            "p1" => :(),
+            "p2" => :(),
+        )
+        io = IOBuffer()
+        ioc = IOContext(io, :color => true)
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        jobs = 2
+        @test_throws Test.FallbackTestSetException("Test run finished with errors") begin
+            runtests(ParallelTestRunner, ["--jobs=$(jobs)", "--verbose"];
+                     testsuite, stdout=ioc, stderr=ioc,
+                     init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
+                     serial=["s1", "s2", "s3", "s4"])
+        end
+        str = String(take!(io))
+        @test contains(str, "Running 6 tests using 2 parallel jobs")
+        @test contains(str, "4 serial test(s)")
+        @test contains(str, "FAILURE")
+        # We'll use jobs + 1 workers because one will crash.
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + jobs + 1
+    end
+
 end
 
 end
