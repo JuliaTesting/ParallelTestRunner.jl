@@ -1,6 +1,21 @@
 using ParallelTestRunner
 using Test
 
+macro show_if_error(io, expr)
+    quote
+        try
+            @elapsed $(esc(expr))
+        catch
+            # Show output in case of failure, to help debugging.
+            output = String(take!($(esc(io))))
+            printstyled(stderr, "Output of failed test >>>>>>>>>>>>>>>>>>>>\n", color=:red, bold=true)
+            println(stderr, output)
+            printstyled(stderr, "End of output <<<<<<<<<<<<<<<<<<<<<<<<<<<<\n", color=:red, bold=true)
+            rethrow()
+        end
+    end
+end
+
 cd(@__DIR__)
 
 include(joinpath(@__DIR__, "utils.jl"))
@@ -854,16 +869,27 @@ end
 
     @testset "serial tests run after parallel" begin
         testsuite = Dict(
-            "serial_x" => :(),
+            "serial_x" => quote
+                children = _count_child_pids($(getpid()))
+                # Make sure serial tests run alone.
+                if children >= 0
+                    @test children == 1
+                end
+            end,
             "parallel_y" => :(),
         )
         io = IOBuffer()
-        runtests(ParallelTestRunner, ["--jobs=2", "--verbose"];
-                 testsuite, stdout=io, stderr=io,
-                 serial=["serial_x"], serial_position=:after)
+        ioc = IOContext(io, :color => true)
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        @show_if_error io runtests(ParallelTestRunner, ["--jobs=2", "--verbose"];
+                                   testsuite, stdout=ioc, stderr=ioc,
+                                   init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
+                                   serial=["serial_x"], serial_position=:after)
         str = String(take!(io))
+        @test contains(str, "Running 2 tests using 1 parallel jobs")
         @test contains(str, "1 serial test(s) will run after")
         @test contains(str, "SUCCESS")
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 1
     end
 
     @testset "serial_position validation" begin
