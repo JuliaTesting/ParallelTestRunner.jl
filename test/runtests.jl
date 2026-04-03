@@ -965,7 +965,7 @@ end
         testsuite = Dict(
             "unit/a" => :(@test true),
             "unit/b" => :(@test true),
-            "integration/c" => :(@test true),
+            "integration/c" => :(@test false),
         )
         io = IOBuffer()
         runtests(ParallelTestRunner, ["unit"]; testsuite, stdout=io, stderr=io,
