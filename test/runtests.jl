@@ -706,7 +706,7 @@ end
 # ── Integration tests ────────────────────────────────────────────────────────
 
 @testset "non-verbose mode" begin
-    testsuite = Dict("quiet" => quote @test true end)
+    testsuite = Dict("quiet" => :())
     io = IOBuffer()
     runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io)
     str = String(take!(io))
@@ -835,18 +835,10 @@ end
 
     @testset "serial tests run before parallel (default)" begin
         testsuite = Dict(
-            "serial_a" => quote
-                @test true
-            end,
-            "serial_b" => quote
-                @test true
-            end,
-            "parallel_1" => quote
-                @test true
-            end,
-            "parallel_2" => quote
-                @test true
-            end,
+            "serial_a" => :(),
+            "serial_b" => :(),
+            "parallel_1" => :(),
+            "parallel_2" => :(),
         )
         io = IOBuffer()
         jobs = 2
@@ -862,12 +854,8 @@ end
 
     @testset "serial tests run after parallel" begin
         testsuite = Dict(
-            "serial_x" => quote
-                @test true
-            end,
-            "parallel_y" => quote
-                @test true
-            end,
+            "serial_x" => :(),
+            "parallel_y" => :(),
         )
         io = IOBuffer()
         runtests(ParallelTestRunner, ["--jobs=2", "--verbose"];
@@ -879,7 +867,7 @@ end
     end
 
     @testset "serial_position validation" begin
-        testsuite = Dict("a" => :(@test true))
+        testsuite = Dict("a" => :())
         io = IOBuffer()
         @test_throws ArgumentError runtests(ParallelTestRunner, String[];
                                             testsuite, stdout=io, stderr=io,
@@ -889,7 +877,6 @@ end
     @testset "serial tests actually run sequentially" begin
         serial_test_body = quote
             sleep(1.0)
-            @test true
             children = _count_child_pids($(getpid()))
             # Make sure serial tests run alone.
             if children >= 0
@@ -901,8 +888,8 @@ end
             "s1" => serial_test_body,
             "s2" => serial_test_body,
             "s3" => serial_test_body,
-            "p1" => :( @test true ),
-            "p2" => :( @test true ),
+            "p1" => :(),
+            "p2" => :(),
         )
         io = IOBuffer()
         ioc = IOContext(io, :color => true)
@@ -950,8 +937,8 @@ end
 
     @testset "empty serial list is a no-op" begin
         testsuite = Dict(
-            "a" => :(@test true),
-            "b" => :(@test true),
+            "a" => :(),
+            "b" => :(),
         )
         io = IOBuffer()
         runtests(ParallelTestRunner, ["--jobs=2"]; testsuite, stdout=io, stderr=io,
@@ -983,8 +970,9 @@ end
 
     @testset "serial names filtered by positional args" begin
         testsuite = Dict(
-            "unit/a" => :(@test true),
-            "unit/b" => :(@test true),
+            "unit/a" => :(),
+            "unit/b" => :(),
+            # This test file shouldn't called, we use `@test false` to make sure it's not.
             "integration/c" => :(@test false),
         )
         io = IOBuffer()
