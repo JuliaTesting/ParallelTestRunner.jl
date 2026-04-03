@@ -1,12 +1,12 @@
 using ParallelTestRunner
 using Test
 
+# Helper macro to show output of tests in case they fail.  Useful for debugging.
 macro show_if_error(io, expr)
     quote
         try
             @elapsed $(esc(expr))
         catch
-            # Show output in case of failure, to help debugging.
             output = String(take!($(esc(io))))
             printstyled(stderr, "Output of failed test >>>>>>>>>>>>>>>>>>>>\n", color=:red, bold=true)
             println(stderr, output)
@@ -490,17 +490,8 @@ end
         njobs = 2
         io = IOBuffer()
         ioc = IOContext(io, :color => true)
-        try
-            runtests(ParallelTestRunner, ["--jobs=$(njobs)", "--verbose"];
-                     testsuite, stdout=ioc, stderr=ioc, init_code=:(include($(joinpath(@__DIR__, "utils.jl")))))
-        catch
-            # Show output in case of failure, to help debugging.
-            output = String(take!(io))
-            printstyled(stderr, "Output of failed test >>>>>>>>>>>>>>>>>>>>\n", color=:red, bold=true)
-            println(stderr, output)
-            printstyled(stderr, "End of output <<<<<<<<<<<<<<<<<<<<<<<<<<<<\n", color=:red, bold=true)
-            rethrow()
-        end
+        @show_if_error io runtests(ParallelTestRunner, ["--jobs=$(njobs)", "--verbose"];
+                                   testsuite, stdout=ioc, stderr=ioc, init_code=:(include($(joinpath(@__DIR__, "utils.jl")))))
         # Make sure we didn't spawn more workers than expected.
         @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
         # Allow a moment for worker processes to exit
@@ -921,18 +912,11 @@ end
         ioc = IOContext(io, :color => true)
         old_id_counter = ParallelTestRunner.ID_COUNTER[]
         jobs = 2
-        elapsed = try
-            @elapsed runtests(ParallelTestRunner, ["--jobs=$(jobs)", "--verbose"];
-                              testsuite, stdout=ioc, stderr=ioc,
-                              init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
-                              serial=["s1", "s2", "s3"])
-        catch
-            # Show output in case of failure, to help debugging.
-            output = String(take!(io))
-            printstyled(stderr, "Output of failed test >>>>>>>>>>>>>>>>>>>>\n", color=:red, bold=true)
-            println(stderr, output)
-            printstyled(stderr, "End of output <<<<<<<<<<<<<<<<<<<<<<<<<<<<\n", color=:red, bold=true)
-            rethrow()
+        elapsed = @elapsed begin
+            @show_if_error io runtests(ParallelTestRunner, ["--jobs=$(jobs)", "--verbose"];
+                                       testsuite, stdout=ioc, stderr=ioc,
+                                       init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
+                                       serial=["s1", "s2", "s3"])
         end
         str = String(take!(io))
         @test contains(str, "SUCCESS")
