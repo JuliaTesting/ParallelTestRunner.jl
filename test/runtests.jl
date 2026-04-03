@@ -941,6 +941,26 @@ end
         @test contains(str, "SUCCESS")
     end
 
+    @testset "parallel tests less than requested jobs" begin
+        testsuite = Dict(
+            "s1" => :(),
+            "s2" => :(),
+            "p1" => :(),
+            "p2" => :(),
+        );
+        io = IOBuffer()
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        runtests(ParallelTestRunner, ["--jobs=3"]; testsuite, stdout=io, stderr=io,
+                 serial=["s1", "s2"])
+        str = String(take!(io))
+        # We have 4 total tests, requested 3 jobs, but only 2 tests are run in parallel, so
+        # 2 is the maximum parallelism we expect, and the number of new workers we spawn.
+        @test contains(str, "Running 4 tests using 2 parallel jobs")
+        @test contains(str, "2 serial test(s)")
+        @test contains(str, "SUCCESS")
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 2
+    end
+
     @testset "serial names filtered by positional args" begin
         testsuite = Dict(
             "unit/a" => :(@test true),
