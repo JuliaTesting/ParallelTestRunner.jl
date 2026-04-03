@@ -868,7 +868,7 @@ function runtests(mod::Module, args::ParsedArgs;
 
     # determine parallelism
     jobs = something(args.jobs, default_njobs())
-    jobs = clamp(jobs, 1, length(parallel_tests))
+    jobs = clamp(jobs, 1, max(1, length(parallel_tests)))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs
         put!(worker_pool, nothing)

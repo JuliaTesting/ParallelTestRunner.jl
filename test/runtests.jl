@@ -928,6 +928,25 @@ end
         @test elapsed >= 3.0
     end
 
+    @testset "all tests serial" begin
+        testsuite = Dict(
+            "a" => :(),
+            "b" => :(),
+            "c" => :(),
+            "d" => :(),
+        )
+        io = IOBuffer()
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        runtests(ParallelTestRunner, ["--jobs=3", "--verbose"];
+                 testsuite, stdout=io, stderr=io,
+                 serial=["a", "b", "c", "d"])
+        str = String(take!(io))
+        @test contains(str, "Running 4 tests using 1 parallel jobs")
+        @test contains(str, "4 serial test(s) will run before")
+        @test contains(str, "SUCCESS")
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 1
+    end
+
     @testset "empty serial list is a no-op" begin
         testsuite = Dict(
             "a" => :(@test true),
