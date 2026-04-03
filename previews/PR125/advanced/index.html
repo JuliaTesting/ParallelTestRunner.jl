@@ -16,11 +16,11 @@ testsuite = Dict(
 runtests(MyPackage, ARGS; testsuite)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Running 2 tests using 2 parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.
                │ <span class="sgr37">  Test   │ ──────────────── CPU ──────────────── │</span>
 <span class="sgr37">Test  (Worker) │ time (s) │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │</span>
-<span class="sgr37">advanced   (1) │     0.13 │   0.00 │  0.0 │       5.86 │   624.69 │</span>
-<span class="sgr37">basic      (2) │     0.19 │   0.00 │  0.0 │       5.68 │   624.69 │</span>
+<span class="sgr37">advanced   (1) │     0.12 │   0.00 │  0.0 │       5.86 │   633.75 │</span>
+<span class="sgr37">basic      (2) │     0.18 │   0.00 │  0.0 │       5.68 │   633.75 │</span>
 
 <span class="sgr1">Test Summary: | <span class="sgr32">Pass  </span><span class="sgr36">Total  </span>Time</span>
-  Overall     | <span class="sgr32">   3  </span><span class="sgr36">    3  </span>7.0s
+  Overall     | <span class="sgr32">   3  </span><span class="sgr36">    3  </span>6.8s
 <span class="sgr32"><span class="sgr1">    SUCCESS</span></span></code></pre><h2 id="Filtering-Test-Files"><a class="docs-heading-anchor" href="#Filtering-Test-Files">Filtering Test Files</a><a id="Filtering-Test-Files-1"></a><a class="docs-heading-anchor-permalink" href="#Filtering-Test-Files" title="Permalink"></a></h2><p>You can also use <a href="../api/#ParallelTestRunner.find_tests"><code>find_tests</code></a> to automatically discover test files and then filter or modify them. This requires manually parsing arguments so that filtering is only applied when the user did not request specific tests to run:</p><pre><code class="language-julia hljs">using ParallelTestRunner
 using MyPackage
 
@@ -40,10 +40,10 @@ end
 runtests(MyPackage, args; testsuite)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Running 1 tests using 1 parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.
                │ <span class="sgr37">  Test   │ ──────────────── CPU ──────────────── │</span>
 <span class="sgr37">Test  (Worker) │ time (s) │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │</span>
-<span class="sgr37">basic      (3) │     0.18 │   0.00 │  0.0 │       5.67 │   649.79 │</span>
+<span class="sgr37">basic      (3) │     0.17 │   0.00 │  0.0 │       5.67 │   683.12 │</span>
 
 <span class="sgr1">Test Summary: | <span class="sgr32">Pass  </span><span class="sgr36">Total  </span>Time</span>
-  Overall     | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>3.5s
+  Overall     | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>3.4s
 <span class="sgr32"><span class="sgr1">    SUCCESS</span></span></code></pre><p>The <a href="../api/#ParallelTestRunner.filter_tests!"><code>filter_tests!</code></a> function returns <code>true</code> if no positional arguments were provided (allowing additional filtering) and <code>false</code> if the user specified specific tests (preventing further filtering).</p><h2 id="Initialization-Code"><a class="docs-heading-anchor" href="#Initialization-Code">Initialization Code</a><a id="Initialization-Code-1"></a><a class="docs-heading-anchor-permalink" href="#Initialization-Code" title="Permalink"></a></h2><p>Use the <code>init_code</code> keyword argument to <a href="../api/#ParallelTestRunner.runtests"><code>runtests</code></a> to provide code that runs before each test file. This is useful for:</p><ul><li>Importing packages</li><li>Defining constants, defaults or helper functions</li><li>Setting up test infrastructure</li></ul><pre><code class="language-julia hljs">using ParallelTestRunner
 using MyPackage
 
@@ -57,8 +57,8 @@ end
 runtests(MyPackage, ARGS; init_code)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Running 2 tests using 2 parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.
                │ <span class="sgr37">  Test   │ ──────────────── CPU ──────────────── │</span>
 <span class="sgr37">Test  (Worker) │ time (s) │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │</span>
-<span class="sgr37">basic      (5) │     0.18 │   0.00 │  0.0 │       5.67 │   652.27 │</span>
-<span class="sgr37">advanced   (4) │     0.18 │   0.00 │  0.0 │       5.67 │   652.27 │</span>
+<span class="sgr37">basic      (5) │     0.18 │   0.00 │  0.0 │       5.67 │   684.23 │</span>
+<span class="sgr37">advanced   (4) │     0.19 │   0.00 │  0.0 │       5.67 │   684.23 │</span>
 
 <span class="sgr1">Test Summary: | <span class="sgr32">Pass  </span><span class="sgr36">Total  </span>Time</span>
   Overall     | <span class="sgr32">   2  </span><span class="sgr36">    2  </span>3.5s
@@ -84,8 +84,8 @@ end
 runtests(MyPackage, ARGS; init_worker_code, init_code)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Running 2 tests using 2 parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.
                │ <span class="sgr37">  Test   │ ──────────────── CPU ──────────────── │</span>
 <span class="sgr37">Test  (Worker) │ time (s) │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │</span>
-<span class="sgr37">basic      (7) │     0.18 │   0.00 │  0.0 │       5.74 │   664.39 │</span>
-<span class="sgr37">advanced   (6) │     0.18 │   0.00 │  0.0 │       5.74 │   664.39 │</span>
+<span class="sgr37">advanced   (6) │     0.18 │   0.00 │  0.0 │       5.74 │   696.48 │</span>
+<span class="sgr37">basic      (7) │     0.18 │   0.00 │  0.0 │       5.74 │   696.48 │</span>
 
 <span class="sgr1">Test Summary: | <span class="sgr32">Pass  </span><span class="sgr36">Total  </span>Time</span>
   Overall     | <span class="sgr32">   2  </span><span class="sgr36">    2  </span>3.5s
@@ -111,42 +111,42 @@ testsuite = Dict(
 # &quot;big_alloc&quot; and &quot;huge_matrix&quot; run one at a time; the rest run in parallel
 runtests(MyPackage, [&quot;--verbose&quot;]; testsuite, serial=[&quot;big_alloc&quot;, &quot;huge_matrix&quot;])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Running 4 tests using 2 parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.
   2 serial test(s) will run before the parallel batch.
-Available memory: 14.150 GiB
+Available memory: 13.936 GiB
                        │ <span class="sgr37">  Test   │   Init   │ Compile │ ──────────────── CPU ──────────────── │</span>
 <span class="sgr37">Test          (Worker) │ time (s) │ time (s) │   (%)   │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │</span>
-<span class="sgr37">huge_matrix        (8) │</span><span class="sgr90">        started at 2026-04-03T16:04:28.767</span>
-<span class="sgr37">huge_matrix        (8) │     0.12 │     3.20 │   99.44 │   0.00 │  0.0 │       5.40 │   672.84 │</span>
-<span class="sgr37">big_alloc          (9) │</span><span class="sgr90">        started at 2026-04-03T16:04:32.310</span>
-<span class="sgr37">big_alloc          (9) │     0.12 │     3.17 │   99.49 │   0.00 │  0.0 │       5.40 │   673.09 │</span>
-<span class="sgr37">fast_unit          (8) │</span><span class="sgr90">        started at 2026-04-03T16:04:34.840</span>
-<span class="sgr37">fast_integration   (9) │</span><span class="sgr90">        started at 2026-04-03T16:04:34.841</span>
-<span class="sgr37">fast_unit          (8) │     0.00 │     0.33 │    0.00 │   0.00 │  0.0 │       0.00 │   672.84 │</span>
-<span class="sgr37">fast_integration   (9) │     0.00 │     0.38 │    0.00 │   0.00 │  0.0 │       0.00 │   673.09 │</span>
+<span class="sgr37">huge_matrix        (8) │</span><span class="sgr90">        started at 2026-04-03T16:49:22.345</span>
+<span class="sgr37">huge_matrix        (8) │     0.11 │     3.04 │   99.54 │   0.00 │  0.0 │       5.40 │   704.76 │</span>
+<span class="sgr37">big_alloc          (8) │</span><span class="sgr90">        started at 2026-04-03T16:49:24.775</span>
+<span class="sgr37">big_alloc          (8) │     0.00 │     0.30 │    0.00 │   0.00 │  0.0 │       0.00 │   704.76 │</span>
+<span class="sgr37">fast_unit          (8) │</span><span class="sgr90">        started at 2026-04-03T16:49:25.181</span>
+<span class="sgr37">fast_unit          (8) │     0.00 │     0.32 │    0.00 │   0.00 │  0.0 │       0.00 │   704.76 │</span>
+<span class="sgr37">fast_integration   (9) │</span><span class="sgr90">        started at 2026-04-03T16:49:26.092</span>
+<span class="sgr37">fast_integration   (9) │     0.11 │     3.08 │   99.51 │   0.00 │  0.0 │       5.40 │   704.88 │</span>
 
 <span class="sgr1">Test Summary:        | <span class="sgr32">Pass  </span><span class="sgr36">Total  </span>Time</span>
-  Overall            | <span class="sgr32">   4  </span><span class="sgr36">    4  </span>7.6s
+  Overall            | <span class="sgr32">   4  </span><span class="sgr36">    4  </span>7.2s
     huge_matrix      | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.1s
-    big_alloc        | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.1s
+    big_alloc        | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.0s
     fast_unit        | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.0s
-    fast_integration | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.0s
+    fast_integration | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.1s
 <span class="sgr32"><span class="sgr1">    SUCCESS</span></span></code></pre><p>By default serial tests run <strong>before</strong> the parallel batch. Use <code>serial_position=:after</code> to run them after instead:</p><pre><code class="language-julia hljs">runtests(MyPackage, [&quot;--verbose&quot;]; testsuite, serial=[&quot;big_alloc&quot;, &quot;huge_matrix&quot;], serial_position=:after)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Running 4 tests using 2 parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.
   2 serial test(s) will run after the parallel batch.
-Available memory: 14.186 GiB
+Available memory: 14.027 GiB
                        │ <span class="sgr37">  Test   │   Init   │ Compile │ ──────────────── CPU ──────────────── │</span>
 <span class="sgr37">Test          (Worker) │ time (s) │ time (s) │   (%)   │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │</span>
-<span class="sgr37">fast_unit         (10) │</span><span class="sgr90">        started at 2026-04-03T16:04:36.468</span>
-<span class="sgr37">fast_integration  (11) │</span><span class="sgr90">        started at 2026-04-03T16:04:36.468</span>
-<span class="sgr37">fast_unit         (10) │     0.11 │     3.17 │   99.51 │   0.00 │  0.0 │       5.38 │   682.02 │</span>
-<span class="sgr37">fast_integration  (11) │     0.11 │     3.19 │   99.55 │   0.00 │  0.0 │       5.40 │   682.02 │</span>
-<span class="sgr37">huge_matrix       (10) │</span><span class="sgr90">        started at 2026-04-03T16:04:38.998</span>
-<span class="sgr37">huge_matrix       (10) │     0.01 │     0.30 │   97.09 │   0.00 │  0.0 │       0.03 │   682.02 │</span>
-<span class="sgr37">big_alloc         (11) │</span><span class="sgr90">        started at 2026-04-03T16:04:39.403</span>
-<span class="sgr37">big_alloc         (11) │     0.00 │     0.30 │    0.00 │   0.00 │  0.0 │       0.00 │   682.02 │</span>
+<span class="sgr37">fast_integration  (10) │</span><span class="sgr90">        started at 2026-04-03T16:49:29.489</span>
+<span class="sgr37">fast_unit         (11) │</span><span class="sgr90">        started at 2026-04-03T16:49:29.590</span>
+<span class="sgr37">fast_integration  (10) │     0.11 │     3.09 │   99.54 │   0.00 │  0.0 │       5.40 │   709.56 │</span>
+<span class="sgr37">fast_unit         (11) │     0.11 │     3.11 │   99.57 │   0.00 │  0.0 │       5.38 │   709.56 │</span>
+<span class="sgr37">huge_matrix       (10) │</span><span class="sgr90">        started at 2026-04-03T16:49:32.020</span>
+<span class="sgr37">huge_matrix       (10) │     0.00 │     0.30 │    0.00 │   0.00 │  0.0 │       0.00 │   709.56 │</span>
+<span class="sgr37">big_alloc         (10) │</span><span class="sgr90">        started at 2026-04-03T16:49:32.424</span>
+<span class="sgr37">big_alloc         (10) │     0.00 │     0.29 │    0.00 │   0.00 │  0.0 │       0.00 │   709.56 │</span>
 
 <span class="sgr1">Test Summary:        | <span class="sgr32">Pass  </span><span class="sgr36">Total  </span>Time</span>
-  Overall            | <span class="sgr32">   4  </span><span class="sgr36">    4  </span>4.4s
-    fast_unit        | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.1s
+  Overall            | <span class="sgr32">   4  </span><span class="sgr36">    4  </span>4.3s
     fast_integration | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.1s
+    fast_unit        | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.1s
     huge_matrix      | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.0s
     big_alloc        | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.0s
 <span class="sgr32"><span class="sgr1">    SUCCESS</span></span></code></pre><p>Serial tests participate in the same ordering logic as parallel tests (sorted by historical duration, longest first) and their results appear in the same overall summary.</p><div class="admonition is-success" id="Tip-7da110c9ca7aab54"><header class="admonition-header">Tip<a class="admonition-anchor" href="#Tip-7da110c9ca7aab54" title="Permalink"></a></header><div class="admonition-body"><p>With automatic test discovery via <a href="../api/#ParallelTestRunner.find_tests"><code>find_tests</code></a>, the <code>serial</code> names are the same keys that appear in the testsuite dictionary (e.g. <code>&quot;subdir/memory_test&quot;</code>).</p></div></div><div class="admonition is-info" id="Note-c3fbcceaab705944"><header class="admonition-header">Note<a class="admonition-anchor" href="#Note-c3fbcceaab705944" title="Permalink"></a></header><div class="admonition-body"><p>If the user filters tests via positional arguments (e.g. <code>julia test/runtests.jl unit</code>), any serial test names that were filtered out are silently removed from the serial list.</p></div></div><h2 id="Custom-Workers"><a class="docs-heading-anchor" href="#Custom-Workers">Custom Workers</a><a id="Custom-Workers-1"></a><a class="docs-heading-anchor-permalink" href="#Custom-Workers" title="Permalink"></a></h2><p>For tests that require specific environment variables or Julia flags, you can use the <code>test_worker</code> keyword argument to <a href="../api/#ParallelTestRunner.runtests"><code>runtests</code></a> to assign tests to custom workers:</p><pre><code class="language-julia hljs">using ParallelTestRunner
@@ -179,9 +179,9 @@ testsuite = Dict(
 runtests(MyPackage, ARGS; test_worker, testsuite)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Running 3 tests using 3 parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.
                     │ <span class="sgr37">  Test   │ ──────────────── CPU ──────────────── │</span>
 <span class="sgr37">Test       (Worker) │ time (s) │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │</span>
-<span class="sgr37">normal_test    (12) │     0.11 │   0.00 │  0.0 │       5.38 │   706.14 │</span>
-<span class="sgr37">needs_threads  (13) │     0.12 │   0.00 │  0.0 │       5.38 │   706.14 │</span>
-<span class="sgr37">needs_env_var  (14) │     0.11 │   0.00 │  0.0 │       5.38 │   706.14 │</span>
+<span class="sgr37">needs_threads  (14) │     0.11 │   0.00 │  0.0 │       5.38 │   729.93 │</span>
+<span class="sgr37">normal_test    (12) │     0.11 │   0.00 │  0.0 │       5.38 │   729.93 │</span>
+<span class="sgr37">needs_env_var  (13) │     0.11 │   0.00 │  0.0 │       5.38 │   729.93 │</span>
 
 <span class="sgr1">Test Summary: | <span class="sgr32">Pass  </span><span class="sgr36">Total  </span>Time</span>
   Overall     | <span class="sgr32">   3  </span><span class="sgr36">    3  </span>5.1s
@@ -200,19 +200,19 @@ end
 runtests(MyPackage, args)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Running 2 tests using 2 parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.
                │ <span class="sgr37">  Test   │ ──────────────── CPU ──────────────── │</span>
 <span class="sgr37">Test  (Worker) │ time (s) │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │</span>
-<span class="sgr37">basic     (16) │     0.18 │   0.00 │  0.0 │       5.67 │   724.24 │</span>
-<span class="sgr37">advanced  (15) │     0.18 │   0.00 │  0.0 │       5.67 │   724.24 │</span>
+<span class="sgr37">basic     (16) │     0.18 │   0.00 │  0.0 │       5.67 │   747.99 │</span>
+<span class="sgr37">advanced  (15) │     0.18 │   0.00 │  0.0 │       5.67 │   747.99 │</span>
 
 <span class="sgr1">Test Summary: | <span class="sgr32">Pass  </span><span class="sgr36">Total  </span>Time</span>
-  Overall     | <span class="sgr32">   2  </span><span class="sgr36">    2  </span>3.5s
+  Overall     | <span class="sgr32">   2  </span><span class="sgr36">    2  </span>3.4s
 <span class="sgr32"><span class="sgr1">    SUCCESS</span></span></code></pre><p>Custom flags are stored in the <code>custom</code> field of the <a href="../api/#ParallelTestRunner.ParsedArgs"><code>ParsedArgs</code></a> object, with values of <code>nothing</code> (not set) or <code>Some(value)</code> (set, with optional value).</p><h2 id="Interactive-use"><a class="docs-heading-anchor" href="#Interactive-use">Interactive use</a><a id="Interactive-use-1"></a><a class="docs-heading-anchor-permalink" href="#Interactive-use" title="Permalink"></a></h2><p>Arguments can also be passed via the standard <a href="https://pkgdocs.julialang.org/v1/api/#Pkg.test"><code>Pkg.test</code></a> interface for interactive control. For example, here is how we could run the subset of test files that start with the name <code>test_cool_feature</code> in i) verbose mode, and ii) with a specific number of Julia threads enabled:</p><pre><code class="language-bash hljs"># Start julia in an environment where `MyPackage.jl` is available
 julia --project</code></pre><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; using Pkg</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; # No need to start a fresh session to change threading
        Pkg.test(&quot;MyPackage&quot;; test_args=`--verbose advanced`, julia_args=`--threads=auto`);</code><code class="nohighlight hljs ansi" style="display:block;"><span class="sgr32"><span class="sgr1">     Testing</span></span> MyPackage
-<span class="sgr32"><span class="sgr1">      Status</span></span> `/tmp/jl_fym6DV/Project.toml`
+<span class="sgr32"><span class="sgr1">      Status</span></span> `/tmp/jl_PSJfE3/Project.toml`
   <span class="sgr90">[0b48ad8b] </span>MyPackage v0.0.0 `~/work/ParallelTestRunner.jl/ParallelTestRunner.jl/docs/MyPackage`
   <span class="sgr90">[d3525ed8] </span>ParallelTestRunner v2.5.1 `~/work/ParallelTestRunner.jl/ParallelTestRunner.jl`
   <span class="sgr90">[8dfed614] </span>Test v1.11.0
-<span class="sgr32"><span class="sgr1">      Status</span></span> `/tmp/jl_fym6DV/Manifest.toml`
+<span class="sgr32"><span class="sgr1">      Status</span></span> `/tmp/jl_PSJfE3/Manifest.toml`
   <span class="sgr90">[b5f81e59] </span>IOCapture v1.0.0
   <span class="sgr90">[36869731] </span>Malt v1.4.1
   <span class="sgr90">[0b48ad8b] </span>MyPackage v0.0.0 `~/work/ParallelTestRunner.jl/ParallelTestRunner.jl/docs/MyPackage`
@@ -243,14 +243,14 @@ julia --project</code></pre><pre><code class="language-julia-repl hljs" style="d
   <span class="sgr90">[8e850b90] </span>libblastrampoline_jll v5.15.0+0
 <span class="sgr32"><span class="sgr1">     Testing</span></span> Running tests...
 Running 1 tests using 1 parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.
-Available memory: 13.775 GiB
+Available memory: 13.786 GiB
                │ <span class="sgr37">  Test   │   Init   │ Compile │ ──────────────── CPU ──────────────── │</span>
 <span class="sgr37">Test  (Worker) │ time (s) │ time (s) │   (%)   │ GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │</span>
-<span class="sgr37">advanced   (1) │</span><span class="sgr90">        started at 2026-04-03T16:05:07.729</span>
-<span class="sgr37">advanced   (1) │     0.18 │     3.56 │   98.74 │   0.00 │  0.0 │       5.67 │   475.59 │</span>
+<span class="sgr37">advanced   (1) │</span><span class="sgr90">        started at 2026-04-03T16:50:00.215</span>
+<span class="sgr37">advanced   (1) │     0.17 │     3.38 │   98.82 │   0.00 │  0.0 │       5.67 │   466.54 │</span>
 
 <span class="sgr1">Test Summary: | <span class="sgr32">Pass  </span><span class="sgr36">Total  </span>Time</span>
-  Overall     | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>6.5s
+  Overall     | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>6.0s
     advanced  | <span class="sgr32">   1  </span><span class="sgr36">    1  </span>0.1s
 <span class="sgr32"><span class="sgr1">    SUCCESS</span></span>
 <span class="sgr32"><span class="sgr1">     Testing</span></span> MyPackage tests passed</code></pre><p>Alternatively, arguments can be passed directly from the command line with a shell alias like the one below:</p><pre><code class="language-julia-repl hljs">jltest --threads=auto -- --verbose test_cool_feature</code></pre><p>Shell alias:</p><pre><code class="language-bash hljs">function jltest {
@@ -266,4 +266,4 @@ Available memory: 13.775 GiB
 }</code></pre><h2 id="Best-Practices"><a class="docs-heading-anchor" href="#Best-Practices">Best Practices</a><a id="Best-Practices-1"></a><a class="docs-heading-anchor-permalink" href="#Best-Practices" title="Permalink"></a></h2><ol><li><p><strong>Keep tests isolated</strong>: Each test file runs in its own module, so avoid relying on global state between tests.</p></li><li><p><strong>Use <code>init_code</code> for common setup</strong>: Instead of duplicating setup code in each test file, use <code>init_code</code> to share common initialization. For long-running initialization, consider using <code>init_worker_code</code> so that it is run only once per worker creation instead of before each test.</p></li><li><p><strong>Filter tests appropriately</strong>: Use <a href="../api/#ParallelTestRunner.filter_tests!"><code>filter_tests!</code></a> to respect user-specified test filters while allowing additional programmatic filtering.</p></li><li><p><strong>Handle platform differences</strong>: Use conditional logic in your test suite setup to handle platform-specific tests:</p><pre><code class="language-julia hljs">testsuite = find_tests(pwd())
 if Sys.iswindows()
     delete!(testsuite, &quot;unix_specific_test&quot;)
-end</code></pre></li><li><p><strong>Load balance the test files</strong>: <code>ParallelTestRunner</code> runs the tests files in parallel, ideally all test files should run for <em>roughly</em> the same time for better performance. Having few long-running test files and other short-running ones hinders scalability.</p></li><li><p><strong>Use custom workers sparingly</strong>: Custom workers add overhead. Only use them when tests genuinely require different configurations.</p></li><li><p><strong>Use <code>serial</code> for resource-intensive tests</strong>: If a test allocates significant memory or uses exclusive hardware resources, mark it as serial rather than reducing <code>--jobs</code> globally. This keeps the rest of your suite running in parallel.</p></li></ol></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../api/">API Reference »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Friday 3 April 2026 16:05">Friday 3 April 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+end</code></pre></li><li><p><strong>Load balance the test files</strong>: <code>ParallelTestRunner</code> runs the tests files in parallel, ideally all test files should run for <em>roughly</em> the same time for better performance. Having few long-running test files and other short-running ones hinders scalability.</p></li><li><p><strong>Use custom workers sparingly</strong>: Custom workers add overhead. Only use them when tests genuinely require different configurations.</p></li><li><p><strong>Use <code>serial</code> for resource-intensive tests</strong>: If a test allocates significant memory or uses exclusive hardware resources, mark it as serial rather than reducing <code>--jobs</code> globally. This keeps the rest of your suite running in parallel.</p></li></ol></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../api/">API Reference »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Friday 3 April 2026 16:50">Friday 3 April 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
