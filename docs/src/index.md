@@ -107,6 +107,13 @@ Pkg.test("MyPackage"; test_args=`--verbose --jobs=4 integration`)
 Tests run concurrently in isolated worker processes, each inside own module.
 `ParallelTestRunner` records historical tests duration for each package, so that in subsequent runs long-running tests are executed first, to improve load balancing.
 
+### Serial Test Support
+
+Certain tests (e.g. memory-hungry tests) may need to run one at a time.
+The `serial` keyword argument to [`runtests`](@ref) lets you designate specific tests
+for sequential execution, either before or after the parallel batch.
+See [Serial Tests](@ref) in the advanced usage guide for details.
+
 ### Real-time Progress
 
 The test runner provides real-time output showing:
