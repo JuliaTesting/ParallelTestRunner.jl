@@ -1028,7 +1028,15 @@ end
         # We'll use jobs + 1 workers because one will crash.
         @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + jobs + 1
     end
+end
 
+# This testset should always be the last one, don't add anything after this.
+# We want to make sure there are no running workers at the end of the tests.
+@testset "no workers running" begin
+    children = _count_child_pids()
+    if children >= 0
+        @test children == 0
+    end
 end
 
 end

@@ -14,7 +14,7 @@ function _count_child_pids(pid = getpid())
         # because it's spawned by the current process, in that case we subtract
         # one to always exclude it, otherwise if we're getting the number of
         # children of another process we start from 0.
-        count = pid == getpid() : -1 : 0
+        count = pid == getpid() ? -1 : 0
         for line in lines
             m = match(r" *(\d+) +(\d+)", line)
             if !isnothing(m)
