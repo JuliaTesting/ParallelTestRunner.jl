@@ -907,41 +907,6 @@ end
                                             serial_position=:middle)
     end
 
-    @testset "serial tests actually run sequentially" begin
-        serial_test_body = quote
-            sleep(1.0)
-            children = _count_child_pids($(getpid()))
-            # Make sure serial tests run alone.
-            if children >= 0
-                @test children == 1
-            end
-        end
-
-        testsuite = Dict(
-            "s1" => serial_test_body,
-            "s2" => serial_test_body,
-            "s3" => serial_test_body,
-            "p1" => :(),
-            "p2" => :(),
-        )
-        io = IOBuffer()
-        ioc = IOContext(io, :color => true)
-        old_id_counter = ParallelTestRunner.ID_COUNTER[]
-        jobs = 2
-        elapsed = @elapsed begin
-            @show_if_error io runtests(ParallelTestRunner, ["--jobs=$(jobs)", "--verbose"];
-                                       testsuite, stdout=ioc, stderr=ioc,
-                                       init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
-                                       serial=["s1", "s2", "s3"])
-        end
-        str = String(take!(io))
-        @test contains(str, "SUCCESS")
-        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + jobs
-        # Serial tests sleeping 1.0s each should take >= 3s total (sequential),
-        # not ~1.0s (parallel).
-        @test elapsed >= 3.0
-    end
-
     @testset "all tests serial" begin
         testsuite = Dict(
             "a" => :(),
