@@ -840,34 +840,50 @@ end
     end
 
     @testset "serial tests run before parallel (default)" begin
+        serial_test_body = quote
+            children = _count_child_pids($(getpid()))
+            # Make sure serial tests run alone.
+            if children >= 0
+                @test children == 1
+            end
+        end
         testsuite = Dict(
-            "serial_a" => :(),
-            "serial_b" => :(),
+            "serial_1" => serial_test_body,
+            "serial_2" => serial_test_body,
+            "serial_3" => serial_test_body,
             "parallel_1" => :(),
             "parallel_2" => :(),
+            "parallel_3" => :(),
         )
         io = IOBuffer()
         jobs = 2
         old_id_counter = ParallelTestRunner.ID_COUNTER[]
-        runtests(ParallelTestRunner, ["--jobs=$(jobs)", "--verbose"];
-                 testsuite, stdout=io, stderr=io,
-                 serial=["serial_a", "serial_b"])
+        @show_if_error io runtests(ParallelTestRunner, ["--jobs=$(jobs)", "--verbose"];
+                                   testsuite, stdout=io, stderr=io,
+                                   init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
+                                   serial=["serial_1", "serial_2", "serial_3"])
         str = String(take!(io))
-        @test contains(str, "2 serial test(s) will run before")
+        @test contains(str, "Running 6 tests using 2 parallel jobs")
+        @test contains(str, "3 serial test(s) will run before")
         @test contains(str, "SUCCESS")
         @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + jobs
     end
 
     @testset "serial tests run after parallel" begin
-        testsuite = Dict(
-            "serial_x" => quote
-                children = _count_child_pids($(getpid()))
-                # Make sure serial tests run alone.
-                if children >= 0
-                    @test children == 1
+        serial_test_body = quote
+            children = _count_child_pids($(getpid()))
+            # Make sure serial tests run alone.
+            if children >= 0
+                @test children == 1
                 end
-            end,
-            "parallel_y" => :(),
+        end
+        testsuite = Dict(
+            "serial_1" => serial_test_body,
+            "serial_2" => serial_test_body,
+            "serial_3" => serial_test_body,
+            "parallel_1" => :(),
+            "parallel_2" => :(),
+            "parallel_3" => :(),
         )
         io = IOBuffer()
         ioc = IOContext(io, :color => true)
@@ -875,12 +891,12 @@ end
         @show_if_error io runtests(ParallelTestRunner, ["--jobs=2", "--verbose"];
                                    testsuite, stdout=ioc, stderr=ioc,
                                    init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
-                                   serial=["serial_x"], serial_position=:after)
+                                   serial=["serial_1", "serial_2", "serial_3"], serial_position=:after)
         str = String(take!(io))
-        @test contains(str, "Running 2 tests using 1 parallel jobs")
-        @test contains(str, "1 serial test(s) will run after")
+        @test contains(str, "Running 6 tests using 2 parallel jobs")
+        @test contains(str, "3 serial test(s) will run after")
         @test contains(str, "SUCCESS")
-        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 1
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 2
     end
 
     @testset "serial_position validation" begin

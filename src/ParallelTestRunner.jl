@@ -1082,8 +1082,31 @@ function runtests(mod::Module, args::ParsedArgs;
     #
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
+    # After parallel-before-serial: stop extra workers so only one process is alive for
+    # serial tests, but keep one parallel worker so we do not add a third addworker (ID_COUNTER).
+    function drain_pool_leaving_one_worker!(pool, njobs)
+        alive = PTRWorker[]
+        for _ in 1:njobs
+            p = take!(pool)
+            if p !== nothing && Malt.isrunning(p)
+                push!(alive, p)
+            end
+        end
+        while length(alive) > 1
+            Malt.stop(pop!(alive))
+        end
+        kept = isempty(alive) ? nothing : alive[1]
+        if kept !== nothing
+            put!(pool, kept)
+        end
+        for _ in 1:(njobs - (kept === nothing ? 0 : 1))
+            put!(pool, nothing)
+        end
+    end
     try
-        for (phase_tests, sem, shared_worker) in test_phases
+        phases = test_phases
+        for i in 1:length(phases)
+            phase_tests, sem, shared_worker = phases[i]
             isempty(phase_tests) && continue
             # for serial phases, reserve one pool slot for the shared worker
             if !isnothing(shared_worker)
@@ -1196,6 +1219,14 @@ function runtests(mod::Module, args::ParsedArgs;
             if !isnothing(shared_worker)
                 put!(worker_pool, shared_worker[])
                 shared_worker[] = nothing
+            end
+            # parallel workers are not stopped while serial tests remain (tests_to_start > 0);
+            # drain before serial-after so only one worker is alive for the serial phase
+            if isnothing(shared_worker) && i < length(phases)
+                next_tests, _, next_sw = phases[i+1]
+                if !isempty(next_tests) && !isnothing(next_sw)
+                    drain_pool_leaving_one_worker!(worker_pool, jobs)
+                end
             end
         end
     catch err
