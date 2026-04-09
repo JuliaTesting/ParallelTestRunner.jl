@@ -141,7 +141,7 @@ function print_header(ctx::TestIOContext, testgroupheader, workerheader)
     lock(ctx.lock)
     try
         # header top
-        printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ")
+        printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ", color = :white)
         printstyled(ctx.stdout, "  Test   │", color = :white)
         ctx.verbose && printstyled(ctx.stdout, "   Init   │", color = :white)
         VERSION >= v"1.11" && ctx.verbose && printstyled(ctx.stdout, " Compile │", color = :white)
