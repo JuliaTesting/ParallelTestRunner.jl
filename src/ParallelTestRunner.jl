@@ -694,6 +694,24 @@ function filter_tests!(testsuite, args::ParsedArgs)
 end
 
 """
+    partition_tests(tests::Vector{String}, serial::Vector{String}) -> (serial_tests, parallel_tests)
+
+Split `tests` into two ordered vectors: tests named in `serial` (preserving their
+order in `tests`) and the remaining parallel tests. Throws `ArgumentError` if any
+name in `serial` is not present in `tests`.
+"""
+function partition_tests(tests::Vector{String}, serial::Vector{String})
+    serial_set = Set(serial)
+    unknown = setdiff(serial_set, Set(tests))
+    if !isempty(unknown)
+        throw(ArgumentError("serial test(s) not found in testsuite: $(join(sort!(collect(unknown)), ", "))"))
+    end
+    serial_tests = filter(t -> t in serial_set, tests)
+    parallel_tests = filter(t -> !(t in serial_set), tests)
+    return serial_tests, parallel_tests
+end
+
+"""
     runtests(mod::Module, args::Union{ParsedArgs,Array{String}};
              testsuite::Dict{String,Expr}=find_tests(pwd()),
              init_code = :(),
@@ -701,7 +719,9 @@ end
              test_worker = Returns(nothing),
              stdout = Base.stdout,
              stderr = Base.stderr,
-             max_worker_rss = get_max_worker_rss())
+             max_worker_rss = get_max_worker_rss(),
+             serial = String[],
+             serial_position::Symbol = :before)
     runtests(mod::Module, ARGS; ...)
 
 Run Julia tests in parallel across multiple worker processes.
@@ -725,6 +745,10 @@ Several keyword arguments are also supported:
   When returning `nothing`, the test will be assigned to any available default worker.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
+- `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time
+  instead of in parallel. An `ArgumentError` is thrown if any name is not found in the testsuite.
+- `serial_position`: When to run serial tests relative to the parallel batch.
+  Must be `:before` (default) or `:after`.
 
 ## Command Line Options
 
@@ -792,6 +816,14 @@ end
 runtests(MyPackage, args; testsuite)
 ```
 
+Run memory-hungry tests serially before the parallel batch
+```julia
+using ParallelTestRunner
+using MyPackage
+
+runtests(MyPackage, ARGS; serial=["big_alloc_test", "huge_matrix"])
+```
+
 ## Memory Management
 
 Workers are automatically recycled when they exceed memory limits to prevent out-of-memory
@@ -800,7 +832,8 @@ issues during long test runs. The memory limit is set based on system architectu
 function runtests(mod::Module, args::ParsedArgs;
                   testsuite::Dict{String,Expr} = find_tests(pwd()),
                   init_code = :(), init_worker_code = :(), test_worker = Returns(nothing),
-                  stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss())
+                  stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss(),
+                  serial::Vector{String} = String[], serial_position::Symbol = :before)
     #
     # set-up
     #
@@ -814,8 +847,15 @@ function runtests(mod::Module, args::ParsedArgs;
         exit(0)
     end
 
+    # validate serial_position
+    serial_position in (:before, :after) ||
+        throw(ArgumentError("serial_position must be :before or :after, got :$serial_position"))
+
     # filter tests
     filter_tests!(testsuite, args)
+
+    # filter serial list to only include tests that survived filtering
+    serial = filter(t -> haskey(testsuite, t), serial)
 
     # determine test order
     tests = collect(keys(testsuite))
@@ -823,16 +863,21 @@ function runtests(mod::Module, args::ParsedArgs;
     historical_durations = load_test_history(mod)
     sort!(tests, by = x -> -get(historical_durations, x, Inf))
 
+    # partition into serial and parallel groups
+    serial_tests, parallel_tests = partition_tests(tests, serial)
+
     # determine parallelism
     jobs = something(args.jobs, default_njobs())
-    jobs = clamp(jobs, 1, length(tests))
-    println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
-    !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
-    sem = Base.Semaphore(max(1, jobs))
+    jobs = clamp(jobs, 1, max(1, length(parallel_tests)))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs
         put!(worker_pool, nothing)
     end
+    println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
+    if !isempty(serial_tests)
+        println(stdout, "  $(length(serial_tests)) serial test(s) will run $(serial_position) the parallel batch.")
+    end
+    !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
 
     t0 = time()
     results = []
@@ -841,6 +886,16 @@ function runtests(mod::Module, args::ParsedArgs;
     results_lock = ReentrantLock() # to protect concurrent access to results
 
     worker_tasks = Task[]
+
+    serial_worker = Ref{Union{Nothing, PTRWorker}}(nothing)
+
+    test_phases = if serial_position === :before
+        ((serial_tests, Base.Semaphore(1), serial_worker),
+         (parallel_tests, Base.Semaphore(max(1, jobs)), nothing))
+    else
+        ((parallel_tests, Base.Semaphore(max(1, jobs)), nothing),
+         (serial_tests, Base.Semaphore(1), serial_worker))
+    end
 
     done = false
     function stop_work()
@@ -1027,105 +1082,152 @@ function runtests(mod::Module, args::ParsedArgs;
     #
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
+    # After parallel-before-serial: stop extra workers so only one process is alive for
+    # serial tests, but keep one parallel worker so we do not add a third addworker (ID_COUNTER).
+    function drain_pool_leaving_one_worker!(pool, njobs)
+        alive = PTRWorker[]
+        for _ in 1:njobs
+            p = take!(pool)
+            if p !== nothing && Malt.isrunning(p)
+                push!(alive, p)
+            end
+        end
+        while length(alive) > 1
+            Malt.stop(pop!(alive))
+        end
+        kept = isempty(alive) ? nothing : alive[1]
+        if kept !== nothing
+            put!(pool, kept)
+        end
+        for _ in 1:(njobs - (kept === nothing ? 0 : 1))
+            put!(pool, nothing)
+        end
+    end
     try
-        @sync for test in tests
-            push!(worker_tasks, Threads.@spawn begin
-                local p = nothing
-                acquired = false
-                try
-                    Base.acquire(sem)
-                    acquired = true
-                    p = take!(worker_pool)
-                    Threads.atomic_sub!(tests_to_start, 1)
+        phases = test_phases
+        for i in 1:length(phases)
+            phase_tests, sem, shared_worker = phases[i]
+            isempty(phase_tests) && continue
+            # for serial phases, reserve one pool slot for the shared worker
+            if !isnothing(shared_worker)
+                shared_worker[] = take!(worker_pool)
+            end
+            @sync for test in phase_tests
+                push!(worker_tasks, Threads.@spawn begin
+                          local p = nothing
+                          acquired = false
+                          try
+                              Base.acquire(sem)
+                              acquired = true
+                              p = !isnothing(shared_worker) ? shared_worker[] : take!(worker_pool)
+                              Threads.atomic_sub!(tests_to_start, 1)
 
-                    done && return
+                              done && return
 
-                    test_t0 = Base.@lock test_lock begin
-                        test_t0 = time()
-                        running_tests[test] = test_t0
-                    end
+                              test_t0 = Base.@lock test_lock begin
+                                  test_t0 = time()
+                                  running_tests[test] = test_t0
+                              end
 
-                    # pass in init_worker_code to custom worker function if defined
-                    wrkr = if init_worker_code == :()
-                        test_worker(test)
-                    else
-                        test_worker(test, init_worker_code)
-                    end
-                    if wrkr === nothing
-                        wrkr = p
-                    end
-                    # if a worker failed, spawn a new one
-                    if wrkr === nothing || !Malt.isrunning(wrkr)
-                        wrkr = p = addworker(; init_worker_code, io_ctx.color)
-                    end
+                              # pass in init_worker_code to custom worker function if defined
+                              wrkr = if init_worker_code == :()
+                                  test_worker(test)
+                              else
+                                  test_worker(test, init_worker_code)
+                              end
+                              if wrkr === nothing
+                                  wrkr = p
+                              end
+                              # if a worker failed, spawn a new one
+                              if wrkr === nothing || !Malt.isrunning(wrkr)
+                                  wrkr = p = addworker(; init_worker_code, io_ctx.color)
+                              end
 
-                    # run the test
-                    put!(printer_channel, (:started, test, worker_id(wrkr)))
-                    result = try
-                        Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
-                        Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
-                                               testsuite[test], test, init_code, test_t0)
-                    catch ex
-                        if isa(ex, InterruptException)
-                            # the worker got interrupted, signal other tasks to stop
-                            stop_work()
-                            return
-                        end
+                              # run the test
+                              put!(printer_channel, (:started, test, worker_id(wrkr)))
+                              result = try
+                                  Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
+                                  Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
+                                                         testsuite[test], test, init_code, test_t0)
+                              catch ex
+                                  if isa(ex, InterruptException)
+                                      # the worker got interrupted, signal other tasks to stop
+                                      stop_work()
+                                      return
+                                  end
 
-                        ex
-                    end
-                    test_t1 = time()
-                    output = Base.@lock wrkr.io_lock String(take!(wrkr.io))
-                    Base.@lock results_lock push!(results, (; test, result, output, test_t0, test_t1))
+                                  ex
+                              end
+                              test_t1 = time()
+                              output = Base.@lock wrkr.io_lock String(take!(wrkr.io))
+                              Base.@lock results_lock push!(results, (; test, result, output, test_t0, test_t1))
 
-                    # act on the results
-                    if result isa AbstractTestRecord
-                        put!(printer_channel, (:finished, test, worker_id(wrkr), result))
-                        if anynonpass(result[]) && args.quickfail !== nothing
-                            stop_work()
-                            return
-                        end
+                              # act on the results
+                              if result isa AbstractTestRecord
+                                  put!(printer_channel, (:finished, test, worker_id(wrkr), result))
+                                  if anynonpass(result[]) && args.quickfail !== nothing
+                                      stop_work()
+                                      return
+                                  end
 
-                        if memory_usage(result) > max_worker_rss
-                            # the worker has reached the max-rss limit, recycle it
-                            # so future tests start with a smaller working set
-                            Malt.stop(wrkr)
-                        end
-                    else
-                        # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
-                        @assert result isa Exception
-                        put!(printer_channel, (:crashed, test, worker_id(wrkr)))
-                        if args.quickfail !== nothing
-                            stop_work()
-                            return
-                        end
+                                  if memory_usage(result) > max_worker_rss
+                                      # the worker has reached the max-rss limit, recycle it
+                                      # so future tests start with a smaller working set
+                                      Malt.stop(wrkr)
+                                  end
+                              else
+                                  # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
+                                  @assert result isa Exception
+                                  put!(printer_channel, (:crashed, test, worker_id(wrkr)))
+                                  if args.quickfail !== nothing
+                                      stop_work()
+                                      return
+                                  end
 
-                        # the worker encountered some serious failure, recycle it
-                        Malt.stop(wrkr)
-                    end
+                                  # the worker encountered some serious failure, recycle it
+                                  Malt.stop(wrkr)
+                              end
 
-                    # get rid of the custom worker
-                    if wrkr != p
-                        Malt.stop(wrkr)
-                    end
+                              # get rid of the custom worker
+                              if wrkr != p
+                                  Malt.stop(wrkr)
+                              end
 
-                    Base.@lock test_lock begin
-                        delete!(running_tests, test)
-                    end
-                catch ex
-                    isa(ex, InterruptException) || rethrow()
-                finally
-                    if acquired
-                        # stop the worker if no more tests will need one from the pool
-                        if tests_to_start[] == 0 && p !== nothing && Malt.isrunning(p)
-                            Malt.stop(p)
-                            p = nothing
-                        end
-                        put!(worker_pool, p)
-                        Base.release(sem)
-                    end
+                              Base.@lock test_lock begin
+                                  delete!(running_tests, test)
+                              end
+                          catch ex
+                              isa(ex, InterruptException) || rethrow()
+                          finally
+                              if acquired
+                                  if !isnothing(shared_worker)
+                                      shared_worker[] = p
+                                  else
+                                      # stop the worker if no more tests will need one from the pool
+                                      if tests_to_start[] == 0 && p !== nothing && Malt.isrunning(p)
+                                          Malt.stop(p)
+                                          p = nothing
+                                      end
+                                      put!(worker_pool, p)
+                                  end
+                                  Base.release(sem)
+                              end
+                          end
+                      end)
+            end
+            # return the serial worker to the pool for potential reuse
+            if !isnothing(shared_worker)
+                put!(worker_pool, shared_worker[])
+                shared_worker[] = nothing
+            end
+            # parallel workers are not stopped while serial tests remain (tests_to_start > 0);
+            # drain before serial-after so only one worker is alive for the serial phase
+            if isnothing(shared_worker) && i < length(phases)
+                next_tests, _, next_sw = phases[i+1]
+                if !isempty(next_tests) && !isnothing(next_sw)
+                    drain_pool_leaving_one_worker!(worker_pool, jobs)
                 end
-            end)
+            end
         end
     catch err
         if !(err isa InterruptException)
