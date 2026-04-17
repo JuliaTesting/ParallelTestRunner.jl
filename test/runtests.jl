@@ -225,6 +225,30 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "global worker kwargs" begin
+    # `exename`/`exeflags`/`env` on runtests should propagate to every
+    # default-pool worker. We verify via an environment variable propagated
+    # through `env`, Julia flags threaded through `exeflags`, and `exename`
+    # supplied as a `Cmd` prefixing the julia binary (what CUDA.jl uses to
+    # wrap julia with `compute-sanitizer`).
+    testsuite = Dict(
+        "env var" => quote
+            @test ENV["GLOBAL_WORKER_TEST"] == "yes"
+        end,
+        "threads" => quote
+            @test Base.Threads.nthreads() == 2
+        end,
+    )
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--verbose"]; testsuite,
+             env = ["GLOBAL_WORKER_TEST" => "yes"],
+             exeflags = ["--threads=2"],
+             exename = `$(Base.julia_cmd()[1])`,  # trivial Cmd wrapping julia
+             stdout = io, stderr = io)
+    str = String(take!(io))
+    @test contains(str, "SUCCESS")
+end
+
 @testset "custom worker with `init_worker_code`" begin
     init_worker_code = quote
         should_be_defined() = true

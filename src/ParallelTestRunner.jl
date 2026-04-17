@@ -514,10 +514,12 @@ function addworker(;
         exeflags = exe[2:end]
     end
 
-    push!(env, "JULIA_NUM_THREADS" => "1")
+    # don't mutate the caller's vector; multiple workers may share a default
+    worker_env = copy(env)
+    push!(worker_env, "JULIA_NUM_THREADS" => "1")
     # Malt already sets OPENBLAS_NUM_THREADS to 1
-    push!(env, "OPENBLAS_NUM_THREADS" => "1")
-    wrkr =  PTRWorker(; exename, exeflags, env)
+    push!(worker_env, "OPENBLAS_NUM_THREADS" => "1")
+    wrkr = PTRWorker(; exename, exeflags, env = worker_env)
     # make ParallelTestRunner available to `init_worker_code`; users commonly
     # need it to reference `AbstractTestRecord`, `execute`, etc. when defining
     # custom record types.
@@ -709,6 +711,9 @@ end
              test_worker = Returns(nothing),
              RecordType::Type{<:AbstractTestRecord} = TestRecord,
              custom_args = (;),
+             exename = nothing,
+             exeflags = nothing,
+             env = Vector{Pair{String, String}}(),
              stdout = Base.stdout,
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss())
@@ -742,6 +747,11 @@ Several keyword arguments are also supported:
 - `custom_args`: Arbitrary value (typically a `NamedTuple`) forwarded to
   [`execute`](@ref). Lets callers thread per-run configuration into a custom
   `RecordType`'s `execute` method without going through `init_code`.
+- `exename`, `exeflags`, `env`: Forwarded to every internal `addworker` call, so
+  they affect all default-pool workers (and any respawns). `exename` may be a
+  `String` or a `Cmd` — passing a `Cmd` lets callers wrap the julia invocation
+  with a tool such as `compute-sanitizer`. Custom workers created from inside a
+  `test_worker` hook are the caller's responsibility.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
 
@@ -821,6 +831,9 @@ function runtests(mod::Module, args::ParsedArgs;
                   init_code = :(), init_worker_code = :(), test_worker = Returns(nothing),
                   RecordType::Type{<:AbstractTestRecord} = TestRecord,
                   custom_args = (;),
+                  exename = nothing,
+                  exeflags = nothing,
+                  env = Vector{Pair{String, String}}(),
                   stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss())
     #
     # set-up
@@ -1077,7 +1090,8 @@ function runtests(mod::Module, args::ParsedArgs;
                     end
                     # if a worker failed, spawn a new one
                     if wrkr === nothing || !Malt.isrunning(wrkr)
-                        wrkr = p = addworker(; init_worker_code, io_ctx.color)
+                        wrkr = p = addworker(; init_worker_code, io_ctx.color,
+                                             exename, exeflags, env)
                     end
 
                     # run the test
