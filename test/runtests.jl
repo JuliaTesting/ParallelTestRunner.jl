@@ -123,6 +123,73 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "custom record type" begin
+    # Define a custom record type with an extra field. Defining it on both the
+    # main process and the workers (via init_worker_code) is required since the
+    # record crosses the Malt serialization boundary. The inner `$name`/`$f` in
+    # the `execute` method's quote need `$(Expr(:$, …))` escaping since they live
+    # inside the outer `init_worker_code` quote.
+    init_worker_code = quote
+        using ParallelTestRunner: Test
+        using Test: DefaultTestSet
+        struct MyRecord <: ParallelTestRunner.AbstractTestRecord
+            value::DefaultTestSet
+            time::Float64
+            bytes::UInt64
+            gctime::Float64
+            compile_time::Float64
+            rss::UInt64
+            total_time::Float64
+            extra::String
+        end
+        function ParallelTestRunner.execute(
+            ::Type{MyRecord}, mod::Module, f, name, start_time, custom_args,
+        )
+            data = @eval mod begin
+                GC.gc(true)
+                stats = @timed @testset WorkerTestSet "placeholder" begin
+                    @testset DefaultTestSet $(Expr(:$, :name)) begin
+                        $(Expr(:$, :f))
+                    end
+                end
+                compile_time = @static VERSION >= v"1.11" ? stats.compile_time : 0.0
+                (; testset = stats.value, stats.time, stats.bytes, stats.gctime, compile_time)
+            end
+            rss = Sys.maxrss()
+            MyRecord(data..., rss, time() - start_time, custom_args.tag)
+        end
+        function ParallelTestRunner.print_test_finished(
+            record::MyRecord, wrkr, test, ctx::ParallelTestRunner.TestIOContext,
+        )
+            lock(ctx.lock)
+            try
+                println(ctx.stdout, "EXTRA[$test]=$(record.extra)")
+                flush(ctx.stdout)
+            finally
+                unlock(ctx.lock)
+            end
+        end
+    end
+
+    eval(init_worker_code)  # also define on the main process so the record deserializes
+
+    testsuite = Dict(
+        "custom" => quote
+            @test 1 + 1 == 2
+        end,
+    )
+
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--verbose"]; testsuite,
+             init_worker_code, RecordType = MyRecord,
+             custom_args = (; tag = "hello"),
+             stdout = io, stderr = io)
+    str = String(take!(io))
+
+    @test contains(str, "EXTRA[custom]=hello")
+    @test contains(str, "SUCCESS")
+end
+
 @testset "custom worker" begin
     function test_worker(name)
         if name == "needs env var"

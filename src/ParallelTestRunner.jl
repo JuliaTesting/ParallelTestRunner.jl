@@ -93,11 +93,11 @@ struct TestRecord <: AbstractTestRecord
     total_time::Float64
 end
 
-function memory_usage(rec::TestRecord)
+function memory_usage(rec::AbstractTestRecord)
     return rec.rss
 end
 
-function Base.getindex(rec::TestRecord)
+function Base.getindex(rec::AbstractTestRecord)
     return rec.value
 end
 
@@ -121,7 +121,7 @@ struct TestIOContext
     rss_align::Int
 end
 
-function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, verbose::Bool)
+function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, verbose::Bool)
     elapsed_align = textwidth("time (s)")
     compile_align = textwidth("Compile")
     gc_align = textwidth("GC (s)")
@@ -137,7 +137,7 @@ function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align:
     )
 end
 
-function print_header(ctx::TestIOContext, testgroupheader, workerheader)
+function print_header(::Type{<:AbstractTestRecord}, ctx::TestIOContext, testgroupheader, workerheader)
     lock(ctx.lock)
     try
         # header top
@@ -160,7 +160,7 @@ function print_header(ctx::TestIOContext, testgroupheader, workerheader)
     end
 end
 
-function print_test_started(wrkr, test, ctx::TestIOContext)
+function print_test_started(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stdout, test, lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │", color = :white)
@@ -174,7 +174,7 @@ function print_test_started(wrkr, test, ctx::TestIOContext)
     end
 end
 
-function print_test_finished(record::TestRecord, wrkr, test, ctx::TestIOContext)
+function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stdout, test, color = :white)
@@ -202,7 +202,7 @@ function print_test_finished(record::TestRecord, wrkr, test, ctx::TestIOContext)
         alloc_str = @sprintf("%5.2f", record.bytes / 2^20)
         printstyled(ctx.stdout, lpad(alloc_str, ctx.alloc_align, " "), " │ ", color = :white)
 
-        rss_str = @sprintf("%5.2f", record.rss / 2^20)
+        rss_str = @sprintf("%5.2f", memory_usage(record) / 2^20)
         printstyled(ctx.stdout, lpad(rss_str, ctx.rss_align, " "), " │\n", color = :white)
 
         flush(ctx.stdout)
@@ -211,7 +211,7 @@ function print_test_finished(record::TestRecord, wrkr, test, ctx::TestIOContext)
     end
 end
 
-function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
+function print_test_failed(record::AbstractTestRecord, wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stderr, test, color = :red)
@@ -243,7 +243,7 @@ function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
     end
 end
 
-function print_test_crashed(wrkr, test, ctx::TestIOContext)
+function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stderr, test, color = :red)
@@ -313,7 +313,33 @@ function Test.finish(ts::WorkerTestSet)
     return ts.wrapped_ts
 end
 
-function runtest(f, name, init_code, start_time)
+function execute(::Type{TestRecord}, mod::Module, f, name, start_time, custom_args)
+    data = @eval mod begin
+        GC.gc(true)
+        Random.seed!(1)
+
+        # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
+        # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
+        # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
+        stats = @timed @testset WorkerTestSet "placeholder" begin
+            @testset DefaultTestSet $name begin
+                $f
+            end
+        end
+
+        compile_time = @static VERSION >= v"1.11" ? stats.compile_time : 0.0
+        (; testset=stats.value, stats.time, stats.bytes, stats.gctime, compile_time)
+    end
+
+    # process results
+    rss = Sys.maxrss()
+    record = TestRecord(data..., rss, time() - start_time)
+
+    GC.gc(true)
+    return record
+end
+
+function runtest(RecordType::Type{<:AbstractTestRecord}, f, name, init_code, start_time, custom_args)
     function inner()
         # generate a temporary module to execute the tests in
         mod = @eval(Main, module $(gensym(name)) end)
@@ -325,29 +351,7 @@ function runtest(f, name, init_code, start_time)
 
         Core.eval(mod, init_code)
 
-        data = @eval mod begin
-            GC.gc(true)
-            Random.seed!(1)
-
-            # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
-            # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
-            # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
-            stats = @timed @testset WorkerTestSet "placeholder" begin
-                @testset DefaultTestSet $name begin
-                    $f
-                end
-            end
-
-            compile_time = @static VERSION >= v"1.11" ? stats.compile_time : 0.0
-            (; testset=stats.value, stats.time, stats.bytes, stats.gctime, compile_time)
-        end
-
-        # process results
-        rss = Sys.maxrss()
-        record = TestRecord(data..., rss, time() - start_time)
-
-        GC.gc(true)
-        return record
+        return execute(RecordType, mod, f, name, start_time, custom_args)
     end
 
     @static if VERSION >= v"1.13.0-DEV.1044"
@@ -514,6 +518,10 @@ function addworker(;
     # Malt already sets OPENBLAS_NUM_THREADS to 1
     push!(env, "OPENBLAS_NUM_THREADS" => "1")
     wrkr =  PTRWorker(; exename, exeflags, env)
+    # make ParallelTestRunner available to `init_worker_code`; users commonly
+    # need it to reference `AbstractTestRecord`, `execute`, etc. when defining
+    # custom record types.
+    Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
     if init_worker_code != :()
         Malt.remote_eval_wait(Main, wrkr.w, init_worker_code)
     end
@@ -699,6 +707,8 @@ end
              init_code = :(),
              init_worker_code = :(),
              test_worker = Returns(nothing),
+             RecordType::Type{<:AbstractTestRecord} = TestRecord,
+             custom_args = (;),
              stdout = Base.stdout,
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss())
@@ -723,6 +733,15 @@ Several keyword arguments are also supported:
 - `init_worker_code`: Code use to initialize each worker. This is run only once per worker instead of once per test.
 - `test_worker`: Optional function that takes a test name and `init_worker_code` if `init_worker_code` is defined and returns a specific worker.
   When returning `nothing`, the test will be assigned to any available default worker.
+- `RecordType`: Concrete subtype of [`AbstractTestRecord`](@ref) used to collect
+  per-test statistics. Defaults to [`TestRecord`](@ref). Users can subtype
+  `AbstractTestRecord` and dispatch [`execute`](@ref) on their type to customize
+  what's measured per test; they typically also override the `print_*` methods.
+  The record type must be defined on both the main process and all workers (e.g.
+  via `init_worker_code`) since it crosses the Malt serialization boundary.
+- `custom_args`: Arbitrary value (typically a `NamedTuple`) forwarded to
+  [`execute`](@ref). Lets callers thread per-run configuration into a custom
+  `RecordType`'s `execute` method without going through `init_code`.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
 
@@ -800,6 +819,8 @@ issues during long test runs. The memory limit is set based on system architectu
 function runtests(mod::Module, args::ParsedArgs;
                   testsuite::Dict{String,Expr} = find_tests(pwd()),
                   init_code = :(), init_worker_code = :(), test_worker = Returns(nothing),
+                  RecordType::Type{<:AbstractTestRecord} = TestRecord,
+                  custom_args = (;),
                   stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss())
     #
     # set-up
@@ -874,8 +895,8 @@ function runtests(mod::Module, args::ParsedArgs;
         stderr.lock = print_lock
     end
 
-    io_ctx = test_IOContext(stdout, stderr, print_lock, name_align, !isnothing(args.verbose))
-    print_header(io_ctx, testgroupheader, workerheader)
+    io_ctx = test_IOContext(RecordType, stdout, stderr, print_lock, name_align, !isnothing(args.verbose))
+    print_header(RecordType, io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
 
@@ -975,7 +996,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         # Optionally print verbose started message
                         if args.verbose !== nothing
                             clear_status()
-                            print_test_started(wrkr, test_name, io_ctx)
+                            print_test_started(RecordType, wrkr, test_name, io_ctx)
                         end
 
                     elseif msg_type == :finished
@@ -992,7 +1013,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         test_name, wrkr = msg[2], msg[3]
 
                         clear_status()
-                        print_test_crashed(wrkr, test_name, io_ctx)
+                        print_test_crashed(RecordType, wrkr, test_name, io_ctx)
                     end
                 end
 
@@ -1064,7 +1085,8 @@ function runtests(mod::Module, args::ParsedArgs;
                     result = try
                         Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
                         Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
-                                               testsuite[test], test, init_code, test_t0)
+                                               RecordType, testsuite[test], test,
+                                               init_code, test_t0, custom_args)
                     catch ex
                         if isa(ex, InterruptException)
                             # the worker got interrupted, signal other tasks to stop
