@@ -79,8 +79,27 @@ if VERSION >= v"1.13.0-DEV.1044"
     using Base.ScopedValues
 end
 
+"""
+    AbstractTestRecord
+
+Abstract supertype for per-test result records. [`TestRecord`](@ref) is the
+default concrete subtype, carrying the captured test set and baseline timing /
+memory statistics. Custom subtypes can attach extra per-test data (e.g. GPU
+statistics) by carrying a `base::TestRecord` field and dispatching
+[`execute`](@ref) on the new type. See the `RecordType` argument of
+[`runtests`](@ref) for how to plug a custom record type into a run.
+"""
 abstract type AbstractTestRecord end
 
+"""
+    TestRecord <: AbstractTestRecord
+
+Default per-test record. Holds the captured `DefaultTestSet` alongside the
+baseline timing and memory statistics that [`runtests`](@ref) prints and
+persists. Custom [`AbstractTestRecord`](@ref) subtypes wrap a `TestRecord` in a
+`base` field; [`parent`](@ref) returns that baseline so the default `print_*`
+methods work unchanged.
+"""
 struct TestRecord <: AbstractTestRecord
     value::DefaultTestSet
 
@@ -102,8 +121,8 @@ default, subtypes of `AbstractTestRecord` are expected to carry a
 `print_*` methods read baseline fields through `parent`, so wrapped types
 inherit the standard output unchanged.
 """
-Base.parent(rec::TestRecord) = rec
 Base.parent(rec::AbstractTestRecord) = rec.base
+Base.parent(rec::TestRecord) = rec
 
 function memory_usage(rec::AbstractTestRecord)
     return parent(rec).rss
@@ -327,6 +346,32 @@ function Test.finish(ts::WorkerTestSet)
     return ts.wrapped_ts
 end
 
+"""
+    execute(::Type{R}, mod::Module, f, name, start_time, custom_args) where {R<:AbstractTestRecord}
+
+Run the test expression `f` inside the sandbox module `mod` and return an
+`R <: AbstractTestRecord`. This is the extension point for custom record
+types: dispatch `execute(::Type{MyRecord}, …)` to collect additional per-test
+statistics without re-implementing the sandbox scaffolding.
+
+The default method for [`TestRecord`](@ref) wraps the test set in a
+[`WorkerTestSet`](@ref) placeholder (so `DefaultTestSet` doesn't swallow
+results at the top level), captures `@timed` stats, and records `Sys.maxrss()`.
+Custom implementations commonly call `execute(TestRecord, mod, f, name,
+start_time, custom_args)` to reuse that baseline and wrap the returned record
+in a new record type.
+
+Arguments:
+
+- `mod` — the per-test sandbox module; the test expression `f` is evaluated
+  into it via `@eval mod`.
+- `f` — the test expression from the `testsuite` dictionary.
+- `name` — the test name (used as the top-level `@testset` name).
+- `start_time` — wall-clock time at which the scheduler picked up this test;
+  subtract from `time()` to get total elapsed time including worker wait.
+- `custom_args` — the `custom_args` value forwarded from [`runtests`](@ref)
+  (arbitrary, typically a `NamedTuple`).
+"""
 function execute(::Type{TestRecord}, mod::Module, f, name, start_time, custom_args)
     data = @eval mod begin
         GC.gc(true)
