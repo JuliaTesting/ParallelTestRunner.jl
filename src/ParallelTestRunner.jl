@@ -93,12 +93,24 @@ struct TestRecord <: AbstractTestRecord
     total_time::Float64
 end
 
+"""
+    parent(rec::AbstractTestRecord) -> TestRecord
+
+Return the [`TestRecord`](@ref) baseline that a custom record type wraps. By
+default, subtypes of `AbstractTestRecord` are expected to carry a
+`base::TestRecord` field; override `parent` for a different layout. The default
+`print_*` methods read baseline fields through `parent`, so wrapped types
+inherit the standard output unchanged.
+"""
+Base.parent(rec::TestRecord) = rec
+Base.parent(rec::AbstractTestRecord) = rec.base
+
 function memory_usage(rec::AbstractTestRecord)
-    return rec.rss
+    return parent(rec).rss
 end
 
 function Base.getindex(rec::AbstractTestRecord)
-    return rec.value
+    return parent(rec).value
 end
 
 
@@ -175,31 +187,32 @@ function print_test_started(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
 end
 
 function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIOContext)
+    base = parent(record)
     lock(ctx.lock)
     try
         printstyled(ctx.stdout, test, color = :white)
         printstyled(ctx.stdout, lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │ ", color = :white)
 
-        time_str = @sprintf("%7.2f", record.time)
+        time_str = @sprintf("%7.2f", base.time)
         printstyled(ctx.stdout, lpad(time_str, ctx.elapsed_align, " "), " │ ", color = :white)
 
         if ctx.verbose
             # pre-testset time
-            init_time_str = @sprintf("%7.2f", record.total_time - record.time)
+            init_time_str = @sprintf("%7.2f", base.total_time - base.time)
             printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align, " "), " │ ", color = :white)
 
             # compilation time
             if VERSION >= v"1.11"
-                init_time_str = @sprintf("%7.2f", Float64(100*record.compile_time/record.time))
+                init_time_str = @sprintf("%7.2f", Float64(100*base.compile_time/base.time))
                 printstyled(ctx.stdout, lpad(init_time_str, ctx.compile_align, " "), " │ ", color = :white)
             end
         end
 
-        gc_str = @sprintf("%5.2f", record.gctime)
+        gc_str = @sprintf("%5.2f", base.gctime)
         printstyled(ctx.stdout, lpad(gc_str, ctx.gc_align, " "), " │ ", color = :white)
-        percent_str = @sprintf("%4.1f", 100 * record.gctime / record.time)
+        percent_str = @sprintf("%4.1f", 100 * base.gctime / base.time)
         printstyled(ctx.stdout, lpad(percent_str, ctx.percent_align, " "), " │ ", color = :white)
-        alloc_str = @sprintf("%5.2f", record.bytes / 2^20)
+        alloc_str = @sprintf("%5.2f", base.bytes / 2^20)
         printstyled(ctx.stdout, lpad(alloc_str, ctx.alloc_align, " "), " │ ", color = :white)
 
         rss_str = @sprintf("%5.2f", memory_usage(record) / 2^20)
@@ -212,6 +225,7 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
 end
 
 function print_test_failed(record::AbstractTestRecord, wrkr, test, ctx::TestIOContext)
+    base = parent(record)
     lock(ctx.lock)
     try
         printstyled(ctx.stderr, test, color = :red)
@@ -221,11 +235,11 @@ function print_test_failed(record::AbstractTestRecord, wrkr, test, ctx::TestIOCo
             , color = :red
         )
 
-        time_str = @sprintf("%7.2f", record.time)
+        time_str = @sprintf("%7.2f", base.time)
         printstyled(ctx.stderr, lpad(time_str, ctx.elapsed_align + 1, " "), " │", color = :red)
 
         if ctx.verbose
-            init_time_str = @sprintf("%7.2f", record.total_time - record.time)
+            init_time_str = @sprintf("%7.2f", base.total_time - base.time)
             printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align + 1, " "), " │ ", color = :red)
         end
 
@@ -739,11 +753,16 @@ Several keyword arguments are also supported:
 - `test_worker`: Optional function that takes a test name and `init_worker_code` if `init_worker_code` is defined and returns a specific worker.
   When returning `nothing`, the test will be assigned to any available default worker.
 - `RecordType`: Concrete subtype of [`AbstractTestRecord`](@ref) used to collect
-  per-test statistics. Defaults to [`TestRecord`](@ref). Users can subtype
-  `AbstractTestRecord` and dispatch [`execute`](@ref) on their type to customize
-  what's measured per test; they typically also override the `print_*` methods.
-  The record type must be defined on both the main process and all workers (e.g.
-  via `init_worker_code`) since it crosses the Malt serialization boundary.
+  per-test statistics. Defaults to [`TestRecord`](@ref). To extend the default
+  record with extra data, define `struct MyRecord <: AbstractTestRecord;
+  base::TestRecord; …; end` and dispatch [`execute`](@ref) on the new type —
+  typically by calling `execute(TestRecord, mod, f, name, start_time,
+  custom_args)` and wrapping the result. The default `print_*` methods read
+  baseline fields through [`parent`](@ref), so wrapped types inherit the
+  standard output; override `print_*` only when you need different layout.
+  The record type must be defined on both the main process and all workers
+  (e.g. via `init_worker_code`) since it crosses the Malt serialization
+  boundary.
 - `custom_args`: Arbitrary value (typically a `NamedTuple`) forwarded to
   [`execute`](@ref). Lets callers thread per-run configuration into a custom
   `RecordType`'s `execute` method without going through `init_code`.

@@ -124,39 +124,21 @@ end
 end
 
 @testset "custom record type" begin
-    # Define a custom record type with an extra field. Defining it on both the
-    # main process and the workers (via init_worker_code) is required since the
-    # record crosses the Malt serialization boundary. The inner `$name`/`$f` in
-    # the `execute` method's quote need `$(Expr(:$, …))` escaping since they live
-    # inside the outer `init_worker_code` quote.
+    # Custom record wraps the default `TestRecord` and adds one field. It must
+    # be defined on both the main process and every worker (via
+    # init_worker_code) because the record crosses the Malt serialization
+    # boundary.
     init_worker_code = quote
-        using ParallelTestRunner: Test
-        using Test: DefaultTestSet
+        using ParallelTestRunner: TestRecord
         struct MyRecord <: ParallelTestRunner.AbstractTestRecord
-            value::DefaultTestSet
-            time::Float64
-            bytes::UInt64
-            gctime::Float64
-            compile_time::Float64
-            rss::UInt64
-            total_time::Float64
+            base::TestRecord
             extra::String
         end
         function ParallelTestRunner.execute(
             ::Type{MyRecord}, mod::Module, f, name, start_time, custom_args,
         )
-            data = @eval mod begin
-                GC.gc(true)
-                stats = @timed @testset WorkerTestSet "placeholder" begin
-                    @testset DefaultTestSet $(Expr(:$, :name)) begin
-                        $(Expr(:$, :f))
-                    end
-                end
-                compile_time = @static VERSION >= v"1.11" ? stats.compile_time : 0.0
-                (; testset = stats.value, stats.time, stats.bytes, stats.gctime, compile_time)
-            end
-            rss = Sys.maxrss()
-            MyRecord(data..., rss, time() - start_time, custom_args.tag)
+            base = ParallelTestRunner.execute(TestRecord, mod, f, name, start_time, custom_args)
+            MyRecord(base, custom_args.tag)
         end
         function ParallelTestRunner.print_test_finished(
             record::MyRecord, wrkr, test, ctx::ParallelTestRunner.TestIOContext,
