@@ -1224,7 +1224,7 @@ function runtests(mod::Module, args::ParsedArgs;
     for (testname, result, output, _start, _stop) in results
         if !isempty(output)
             print(io_ctx.stdout, "\nOutput generated during execution of '")
-            if result isa Exception || anynonpass(result.value)
+            if result isa Exception || anynonpass(result[])
                 printstyled(io_ctx.stdout, testname; color=:red)
             else
                 printstyled(io_ctx.stdout, testname; color=:normal)
