@@ -123,6 +123,55 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "custom record type" begin
+    # Custom record wraps the default `TestRecord` and adds one field. It must
+    # be defined on both the main process and every worker (via
+    # init_worker_code) because the record crosses the Malt serialization
+    # boundary.
+    init_worker_code = quote
+        using ParallelTestRunner: TestRecord
+        struct MyRecord <: ParallelTestRunner.AbstractTestRecord
+            base::TestRecord
+            extra::String
+        end
+        function ParallelTestRunner.execute(
+            ::Type{MyRecord}, mod::Module, f, name, start_time, custom_args,
+        )
+            base = ParallelTestRunner.execute(TestRecord, mod, f, name, start_time, custom_args)
+            MyRecord(base, custom_args.tag)
+        end
+        function ParallelTestRunner.print_test_finished(
+            record::MyRecord, wrkr, test, ctx::ParallelTestRunner.TestIOContext,
+        )
+            lock(ctx.lock)
+            try
+                println(ctx.stdout, "EXTRA[$test]=$(record.extra)")
+                flush(ctx.stdout)
+            finally
+                unlock(ctx.lock)
+            end
+        end
+    end
+
+    eval(init_worker_code)  # also define on the main process so the record deserializes
+
+    testsuite = Dict(
+        "custom" => quote
+            @test 1 + 1 == 2
+        end,
+    )
+
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--verbose"]; testsuite,
+             init_worker_code, RecordType = MyRecord,
+             custom_args = (; tag = "hello"),
+             stdout = io, stderr = io)
+    str = String(take!(io))
+
+    @test contains(str, "EXTRA[custom]=hello")
+    @test contains(str, "SUCCESS")
+end
+
 @testset "custom worker" begin
     function test_worker(name)
         if name == "needs env var"
@@ -155,6 +204,30 @@ end
     @test contains(str, r"doesn't need env var .+ started at")
     @test contains(str, r"threads/1 .+ started at")
     @test contains(str, r"threads/2 .+ started at")
+    @test contains(str, "SUCCESS")
+end
+
+@testset "global worker kwargs" begin
+    # `exename`/`exeflags`/`env` on runtests should propagate to every
+    # default-pool worker. We verify via an environment variable propagated
+    # through `env`, Julia flags threaded through `exeflags`, and `exename`
+    # supplied as a `Cmd` prefixing the julia binary (what CUDA.jl uses to
+    # wrap julia with `compute-sanitizer`).
+    testsuite = Dict(
+        "env var" => quote
+            @test ENV["GLOBAL_WORKER_TEST"] == "yes"
+        end,
+        "threads" => quote
+            @test Base.Threads.nthreads() == 2
+        end,
+    )
+    io = IOBuffer()
+    runtests(ParallelTestRunner, ["--verbose"]; testsuite,
+             env = ["GLOBAL_WORKER_TEST" => "yes"],
+             exeflags = ["--threads=2"],
+             exename = `$(Base.julia_cmd()[1])`,  # trivial Cmd wrapping julia
+             stdout = io, stderr = io)
+    str = String(take!(io))
     @test contains(str, "SUCCESS")
 end
 
