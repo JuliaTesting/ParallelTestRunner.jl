@@ -934,16 +934,15 @@ function runtests(mod::Module, args::ParsedArgs;
     filter_tests!(testsuite, args)
 
     # determine test order
-    test_lock = ReentrantLock() # to protect crucial access to tests and running_tests
-    tests = Lockable(collect(keys(testsuite)), test_lock)
-    Random.shuffle!(@lock test_lock tests[])
+    tests = Lockable(collect(keys(testsuite)))
+    @lock tests Random.shuffle!(tests[])
     historical_durations = load_test_history(mod)
-    sort!(@lock(test_lock, tests[]), by = x -> -get(historical_durations, x, Inf))
+    @lock tests sort!(tests[], by = x -> -get(historical_durations, x, Inf))
 
     # determine parallelism
     jobs = something(args.jobs, default_njobs())
-    jobs = clamp(jobs, 1, length(@lock(test_lock, tests[])))
-    println(stdout, "Running $(length(@lock(test_lock, tests[]))) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
+    jobs = @lock tests clamp(jobs, 1, length(tests[]))
+    @lock tests println(stdout, "Running $(length(tests[])) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
     !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
     sem = Base.Semaphore(max(1, jobs))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
@@ -952,9 +951,8 @@ function runtests(mod::Module, args::ParsedArgs;
     end
 
     t0 = time()
-    results_lock = ReentrantLock() # to protect concurrent access to results
-    results = Lockable([], results_lock)
-    running_tests = Lockable(Dict{String, Float64}(), test_lock)  # test => start_time
+    results = Lockable([])
+    running_tests = Lockable(Dict{String, Float64}())  # test => start_time
 
     worker_tasks = Task[]
 
@@ -978,7 +976,7 @@ function runtests(mod::Module, args::ParsedArgs;
     # pretty print information about gc and mem usage
     testgroupheader = "Test"
     workerheader = "(Worker)"
-    name_align = @lock test_lock maximum(
+    name_align = @lock tests maximum(
         [
             textwidth(testgroupheader) + textwidth(" ") + textwidth(workerheader);
             map(x -> textwidth(x) + 5, tests[])
@@ -1008,15 +1006,15 @@ function runtests(mod::Module, args::ParsedArgs;
 
     function update_status()
         # only draw if we have something to show
-        Base.@lock(test_lock, isempty(running_tests[])) && return
-        completed = Base.@lock results_lock length(results[])
-        total = @lock test_lock length(tests[])
+        @lock(running_tests, isempty(running_tests[])) && return
+        completed = @lock results length(results[])
+        total = @lock tests length(tests[])
 
         # line 1: empty line
         line1 = ""
 
         # line 2: running tests
-        test_list = @lock test_lock sort(collect(keys(running_tests[])), by = x -> running_tests[][x])
+        test_list = @lock running_tests sort(collect(keys(running_tests[])), by = x -> running_tests[][x])
         status_parts = map(test_list) do test
             "$test"
         end
@@ -1031,23 +1029,23 @@ function runtests(mod::Module, args::ParsedArgs;
         line3 = "Progress: $completed/$total tests completed"
         if completed > 0
             # estimate per-test time (slightly pessimistic)
-            durations_done = Base.@lock results_lock [end_time - start_time for (_, _,_, start_time, end_time) in results[]]
+            durations_done = @lock results [end_time - start_time for (_, _,_, start_time, end_time) in results[]]
             μ = mean(durations_done)
             σ = length(durations_done) > 1 ? std(durations_done) : 0.0
             est_per_test = μ + 0.5σ
 
             est_remaining = 0.0
             ## currently-running
-            for (test, start_time) in @lock(test_lock, running_tests[])
+            for (test, start_time) in @lock(running_tests, running_tests[])
                 elapsed = time() - start_time
                 duration = get(historical_durations, test, est_per_test)
                 est_remaining += max(0.0, duration - elapsed)
             end
             ## yet-to-run
-            for test in @lock(test_lock, tests[])
-                @lock(test_lock, haskey(running_tests[], test)) && continue
+            for test in @lock(tests, tests[])
+                @lock(running_tests, haskey(running_tests[], test)) && continue
                 # Test is in any completed test
-                Base.@lock(results_lock, any(r -> test == r.test, results[])) && continue
+                @lock(results, any(r -> test == r.test, results[])) && continue
                 est_remaining += get(historical_durations, test, est_per_test)
             end
 
@@ -1130,7 +1128,7 @@ function runtests(mod::Module, args::ParsedArgs;
             end
             isa(ex, InterruptException) || rethrow()
         finally
-            if @lock test_lock @lock results_lock isempty(running_tests[]) && length(results[]) >= length(tests[])
+            if @lock running_tests @lock results @lock tests isempty(running_tests[]) && length(results[]) >= length(tests[])
                 # XXX: only erase the status if we completed successfully.
                 #      in other cases we'll have printed "caught interrupt"
                 clear_status()
@@ -1142,9 +1140,9 @@ function runtests(mod::Module, args::ParsedArgs;
     # execution
     #
 
-    tests_to_start = @lock test_lock Threads.Atomic{Int}(length(tests[]))
+    tests_to_start = @lock tests Threads.Atomic{Int}(length(tests[]))
     try
-        @sync for test in @lock(test_lock, tests[])
+        @sync for test in @lock(tests, tests[])
             push!(worker_tasks, Threads.@spawn begin
                 local p = nothing
                 acquired = false
@@ -1156,7 +1154,7 @@ function runtests(mod::Module, args::ParsedArgs;
 
                     done && return
 
-                    test_t0 = Base.@lock test_lock begin
+                    test_t0 = @lock running_tests begin
                         test_t0 = time()
                         running_tests[][test] = test_t0
                     end
@@ -1194,7 +1192,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     end
                     test_t1 = time()
                     output = Base.@lock wrkr.io_lock String(take!(wrkr.io))
-                    Base.@lock results_lock push!(results[], (; test, result, output, test_t0, test_t1))
+                    @lock results push!(results[], (; test, result, output, test_t0, test_t1))
 
                     # act on the results
                     if result isa AbstractTestRecord
@@ -1227,7 +1225,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         Malt.stop(wrkr)
                     end
 
-                    Base.@lock test_lock begin
+                    @lock running_tests begin
                         delete!(running_tests[], test)
                     end
                 catch ex
@@ -1284,7 +1282,7 @@ function runtests(mod::Module, args::ParsedArgs;
     end
 
     # print the output generated by each testset
-    for (testname, result, output, _start, _stop) in @lock(results_lock, results[])
+    for (testname, result, output, _start, _stop) in @lock(results, results[])
         if !isempty(output)
             print(io_ctx.stdout, "\nOutput generated during execution of '")
             if result isa Exception || anynonpass(result[])
@@ -1342,7 +1340,7 @@ function runtests(mod::Module, args::ParsedArgs;
     function collect_results()
         with_testset(o_ts) do
             completed_tests = Set{String}()
-            for (testname, result, _output, start, stop) in @lock(results_lock, results[])
+            for (testname, result, _output, start, stop) in @lock(results, results[])
                 push!(completed_tests, testname)
 
                 if result isa AbstractTestRecord
@@ -1364,7 +1362,7 @@ function runtests(mod::Module, args::ParsedArgs;
             end
 
             # mark remaining or running tests as interrupted
-            for test in @lock(test_lock, tests[])
+            for test in @lock(tests, tests[])
                 (test in completed_tests) && continue
                 testset = create_testset(test)
                 Test.record(testset, Test.Error(:test_interrupted, test, nothing, Base.ExceptionStack(NamedTuple[(;exception = "skipped", backtrace = [])]), LineNumberNode(1)))
