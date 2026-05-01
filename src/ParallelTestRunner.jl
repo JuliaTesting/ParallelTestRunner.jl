@@ -989,8 +989,10 @@ function runtests(mod::Module, args::ParsedArgs;
     end
 
     function update_status()
+        _running_tests = Base.@lock test_lock copy(running_tests)
+
         # only draw if we have something to show
-        isempty(running_tests) && return
+        Base.@lock(test_lock, isempty(_running_tests)) && return
         completed = Base.@lock results_lock length(results)
         total = length(tests)
 
@@ -998,7 +1000,7 @@ function runtests(mod::Module, args::ParsedArgs;
         line1 = ""
 
         # line 2: running tests
-        test_list = sort(collect(keys(running_tests)), by = x -> running_tests[x])
+        test_list = sort(collect(keys(_running_tests)), by = x -> _running_tests[x])
         status_parts = map(test_list) do test
             "$test"
         end
@@ -1020,16 +1022,16 @@ function runtests(mod::Module, args::ParsedArgs;
 
             est_remaining = 0.0
             ## currently-running
-            for (test, start_time) in running_tests
+            for (test, start_time) in _running_tests
                 elapsed = time() - start_time
                 duration = get(historical_durations, test, est_per_test)
                 est_remaining += max(0.0, duration - elapsed)
             end
             ## yet-to-run
             for test in tests
-                haskey(running_tests, test) && continue
+                haskey(_running_tests, test) && continue
                 # Test is in any completed test
-                any(r -> test == r.test, results) && continue
+                Base.@lock(results_lock, any(r -> test == r.test, results)) && continue
                 est_remaining += get(historical_durations, test, est_per_test)
             end
 
