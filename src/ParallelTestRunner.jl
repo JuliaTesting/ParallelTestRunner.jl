@@ -46,18 +46,16 @@ const ID_COUNTER = Threads.Atomic{Int}(0)
 # Thin wrapper around Malt.Worker, to handle the stdio loop differently.
 struct PTRWorker <: Malt.AbstractWorker
     w::Malt.Worker
-    io::IOBuffer
-    io_lock::ReentrantLock
+    io::Lockable{IOBuffer, ReentrantLock}
     id::Int
 end
 
 function PTRWorker(; exename=Base.julia_cmd()[1], exeflags=String[], env=String[])
-    io = IOBuffer()
-    io_lock = ReentrantLock()
+    io = Lockable(IOBuffer())
     wrkr = Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false)
-    stdio_loop(wrkr, io, io_lock)
+    stdio_loop(wrkr, io)
     id = ID_COUNTER[] += 1
-    return PTRWorker(wrkr, io, io_lock, id)
+    return PTRWorker(wrkr, io, id)
 end
 
 worker_id(wrkr::PTRWorker) = wrkr.id
@@ -311,11 +309,11 @@ function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
 end
 
 # Adapted from `Malt._stdio_loop`
-function stdio_loop(worker::Malt.Worker, io, io_lock::ReentrantLock)
+function stdio_loop(worker::Malt.Worker, io::Lockable)
     Threads.@spawn while !eof(worker.stdout) && Malt.isrunning(worker)
         try
             bytes = readavailable(worker.stdout)
-            @lock io_lock write(io, bytes)
+            @lock io write(io[], bytes)
         catch
             break
         end
@@ -323,7 +321,7 @@ function stdio_loop(worker::Malt.Worker, io, io_lock::ReentrantLock)
     Threads.@spawn while !eof(worker.stderr) && Malt.isrunning(worker)
         try
             bytes = readavailable(worker.stderr)
-            @lock io_lock write(io, bytes)
+            @lock io write(io[], bytes)
         catch
             break
         end
@@ -1191,7 +1189,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         ex
                     end
                     test_t1 = time()
-                    output = Base.@lock wrkr.io_lock String(take!(wrkr.io))
+                    output = @lock wrkr.io String(take!(wrkr.io[]))
                     @lock results push!(results[], (; test, result, output, test_t0, test_t1))
 
                     # act on the results
