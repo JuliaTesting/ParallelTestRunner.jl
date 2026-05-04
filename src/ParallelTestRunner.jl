@@ -932,15 +932,15 @@ function runtests(mod::Module, args::ParsedArgs;
     filter_tests!(testsuite, args)
 
     # determine test order
-    tests = Lockable(collect(keys(testsuite)))
-    @lock tests Random.shuffle!(tests[])
+    tests = collect(keys(testsuite))
+    Random.shuffle!(tests)
     historical_durations = load_test_history(mod)
-    @lock tests sort!(tests[], by = x -> -get(historical_durations, x, Inf))
+    sort!(tests, by = x -> -get(historical_durations, x, Inf))
 
     # determine parallelism
     jobs = something(args.jobs, default_njobs())
-    jobs = @lock tests clamp(jobs, 1, length(tests[]))
-    @lock tests println(stdout, "Running $(length(tests[])) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
+    jobs = clamp(jobs, 1, length(tests))
+    println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
     !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
     sem = Base.Semaphore(max(1, jobs))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
@@ -974,10 +974,10 @@ function runtests(mod::Module, args::ParsedArgs;
     # pretty print information about gc and mem usage
     testgroupheader = "Test"
     workerheader = "(Worker)"
-    name_align = @lock tests maximum(
+    name_align = maximum(
         [
             textwidth(testgroupheader) + textwidth(" ") + textwidth(workerheader);
-            map(x -> textwidth(x) + 5, tests[])
+            map(x -> textwidth(x) + 5, tests)
         ]
     )
 
@@ -1009,7 +1009,7 @@ function runtests(mod::Module, args::ParsedArgs;
         isempty(running_snapshot) && return
         results_snapshot = @lock results copy(results[])
         completed = length(results_snapshot)
-        total = @lock tests length(tests[])
+        total = length(tests)
 
         # line 1: empty line
         line1 = ""
@@ -1043,7 +1043,7 @@ function runtests(mod::Module, args::ParsedArgs;
                 est_remaining += max(0.0, duration - elapsed)
             end
             ## yet-to-run
-            @lock tests for test in tests[]
+            for test in tests
                 haskey(running_snapshot, test) && continue
                 # Test is in any completed test
                 any(r -> test == r.test, results_snapshot) && continue
@@ -1131,8 +1131,7 @@ function runtests(mod::Module, args::ParsedArgs;
         finally
             n_running = @lock running_tests length(running_tests[])
             n_results = @lock results length(results[])
-            n_tests = @lock tests length(tests[])
-            if n_running == 0 && n_results >= n_tests
+            if n_running == 0 && n_results >= length(tests)
                 # XXX: only erase the status if we completed successfully.
                 #      in other cases we'll have printed "caught interrupt"
                 clear_status()
@@ -1144,9 +1143,9 @@ function runtests(mod::Module, args::ParsedArgs;
     # execution
     #
 
-    tests_to_start = @lock tests Threads.Atomic{Int}(length(tests[]))
+    tests_to_start = Threads.Atomic{Int}(length(tests))
     try
-        @sync for test in @lock(tests, tests[])
+        @sync for test in tests
             push!(worker_tasks, Threads.@spawn begin
                 local p = nothing
                 acquired = false
@@ -1366,7 +1365,7 @@ function runtests(mod::Module, args::ParsedArgs;
             end
 
             # mark remaining or running tests as interrupted
-            for test in @lock(tests, tests[])
+            for test in tests
                 (test in completed_tests) && continue
                 testset = create_testset(test)
                 Test.record(testset, Test.Error(:test_interrupted, test, nothing, Base.ExceptionStack(NamedTuple[(;exception = "skipped", backtrace = [])]), LineNumberNode(1)))
