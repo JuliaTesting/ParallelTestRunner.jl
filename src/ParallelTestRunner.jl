@@ -1003,16 +1003,19 @@ function runtests(mod::Module, args::ParsedArgs;
     end
 
     function update_status()
-        # only draw if we have something to show
-        @lock(running_tests, isempty(running_tests[])) && return
-        completed = @lock results length(results[])
+        # take consistent snapshots once, so the rest of this function operates on
+        # frozen data rather than racing with workers that mutate these collections
+        running_snapshot = @lock running_tests copy(running_tests[])
+        isempty(running_snapshot) && return
+        results_snapshot = @lock results copy(results[])
+        completed = length(results_snapshot)
         total = @lock tests length(tests[])
 
         # line 1: empty line
         line1 = ""
 
         # line 2: running tests
-        test_list = @lock running_tests sort(collect(keys(running_tests[])), by = x -> running_tests[][x])
+        test_list = sort(collect(keys(running_snapshot)), by = x -> running_snapshot[x])
         status_parts = map(test_list) do test
             "$test"
         end
@@ -1027,23 +1030,23 @@ function runtests(mod::Module, args::ParsedArgs;
         line3 = "Progress: $completed/$total tests completed"
         if completed > 0
             # estimate per-test time (slightly pessimistic)
-            durations_done = @lock results [end_time - start_time for (_, _,_, start_time, end_time) in results[]]
+            durations_done = [end_time - start_time for (_, _,_, start_time, end_time) in results_snapshot]
             μ = mean(durations_done)
             σ = length(durations_done) > 1 ? std(durations_done) : 0.0
             est_per_test = μ + 0.5σ
 
             est_remaining = 0.0
             ## currently-running
-            for (test, start_time) in @lock(running_tests, running_tests[])
+            for (test, start_time) in running_snapshot
                 elapsed = time() - start_time
                 duration = get(historical_durations, test, est_per_test)
                 est_remaining += max(0.0, duration - elapsed)
             end
             ## yet-to-run
-            for test in @lock(tests, tests[])
-                @lock(running_tests, haskey(running_tests[], test)) && continue
+            @lock tests for test in tests[]
+                haskey(running_snapshot, test) && continue
                 # Test is in any completed test
-                @lock(results, any(r -> test == r.test, results[])) && continue
+                any(r -> test == r.test, results_snapshot) && continue
                 est_remaining += get(historical_durations, test, est_per_test)
             end
 
@@ -1126,7 +1129,10 @@ function runtests(mod::Module, args::ParsedArgs;
             end
             isa(ex, InterruptException) || rethrow()
         finally
-            if @lock running_tests @lock results @lock tests isempty(running_tests[]) && length(results[]) >= length(tests[])
+            n_running = @lock running_tests length(running_tests[])
+            n_results = @lock results length(results[])
+            n_tests = @lock tests length(tests[])
+            if n_running == 0 && n_results >= n_tests
                 # XXX: only erase the status if we completed successfully.
                 #      in other cases we'll have printed "caught interrupt"
                 clear_status()
