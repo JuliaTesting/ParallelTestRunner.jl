@@ -761,8 +761,16 @@ end
 Filter tests in `testsuite` based on command-line arguments in `args`.
 
 Returns `true` if additional filtering may be done by the caller, `false` otherwise.
+
+When `--list` is requested, the full `testsuite` is preserved and `false` is
+returned so that callers skip any conditional filtering of their own: listing
+should show every available test, not just the ones that would run by default.
 """
 function filter_tests!(testsuite, args::ParsedArgs)
+    # when only listing tests, keep the full catalog and let the caller skip its
+    # own filtering, so that every available test is shown
+    args.list !== nothing && return false
+
     # the user did not request specific tests, so let the caller do its own filtering
     isempty(args.positionals) && return true
 

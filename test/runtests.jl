@@ -713,6 +713,20 @@ end
         @test filter_tests!(testsuite, args) == false
         @test isempty(testsuite)
     end
+
+    @testset "listing preserves all tests" begin
+        testsuite = Dict("a" => :(), "b" => :(), "c" => :())
+        args = parse_args(["--list"])
+        @test filter_tests!(testsuite, args) == false
+        @test length(testsuite) == 3
+    end
+
+    @testset "listing ignores positional filters" begin
+        testsuite = Dict("a" => :(), "b" => :())
+        args = parse_args(["--list", "a"])
+        @test filter_tests!(testsuite, args) == false
+        @test length(testsuite) == 2
+    end
 end
 
 @testset "find_tests edge cases" begin
