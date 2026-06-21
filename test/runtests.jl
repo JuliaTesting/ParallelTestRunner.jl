@@ -45,7 +45,7 @@ include(joinpath(@__DIR__, "utils.jl"))
     @test contains(str, "Available memory:")
     @test contains(str, "Init")
 
-     # compile time as part of the struct not available before 1.11
+    # compile time as part of the struct not available before 1.11
     if VERSION >= v"1.11"
         @test contains(str, "Compile")
         @test contains(str, "(%)")
@@ -151,13 +151,13 @@ end
         end
         function ParallelTestRunner.execute(
             ::Type{MyRecord}, mod::Module, f, name, start_time, custom_args,
-        )
+            )
             base = ParallelTestRunner.execute(TestRecord, mod, f, name, start_time, custom_args)
             MyRecord(base, custom_args.tag)
         end
         function ParallelTestRunner.print_test_finished(
             record::MyRecord, wrkr, test, ctx::ParallelTestRunner.TestIOContext,
-        )
+            )
             lock(ctx.lock)
             try
                 println(ctx.stdout, "EXTRA[$test]=$(record.extra)")
@@ -962,7 +962,7 @@ end
             # Make sure serial tests run alone.
             if children >= 0
                 @test children == 1
-                end
+            end
         end
         testsuite = Dict(
             "serial_1" => serial_test_body,
