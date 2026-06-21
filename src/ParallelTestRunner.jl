@@ -23,23 +23,39 @@ function anynonpass(ts::Test.AbstractTestSet)
     end
 end
 
+# Thin compatibility shim for using `Lockable` also in Julia v1.10
+if VERSION >= v"1.11.0-DEV.1568"
+    const Lockable = Base.Lockable
+else
+    # Adapted from <https://github.com/JuliaLang/julia/pull/52898>.
+    struct Lockable{T, L <: Base.AbstractLock}
+        value::T
+        lock::L
+    end
+
+    Lockable(value) = Lockable(value, ReentrantLock())
+    Base.getindex(l::Lockable) = (Base.assert_havelock(l.lock); l.value)
+
+    Base.lock(l::Lockable) = Base.lock(l.lock)
+    Base.trylock(l::Lockable) = Base.trylock(l.lock)
+    Base.unlock(l::Lockable) = Base.unlock(l.lock)
+end
+
 const ID_COUNTER = Threads.Atomic{Int}(0)
 
 # Thin wrapper around Malt.Worker, to handle the stdio loop differently.
 struct PTRWorker <: Malt.AbstractWorker
     w::Malt.Worker
-    io::IOBuffer
-    io_lock::ReentrantLock
+    io::Lockable{IOBuffer, ReentrantLock}
     id::Int
 end
 
 function PTRWorker(; exename=Base.julia_cmd()[1], exeflags=String[], env=String[])
-    io = IOBuffer()
-    io_lock = ReentrantLock()
+    io = Lockable(IOBuffer())
     wrkr = Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false)
-    stdio_loop(wrkr, io, io_lock)
+    stdio_loop(wrkr, io)
     id = ID_COUNTER[] += 1
-    return PTRWorker(wrkr, io, io_lock, id)
+    return PTRWorker(wrkr, io, id)
 end
 
 worker_id(wrkr::PTRWorker) = wrkr.id
@@ -79,8 +95,27 @@ if VERSION >= v"1.13.0-DEV.1044"
     using Base.ScopedValues
 end
 
+"""
+    AbstractTestRecord
+
+Abstract supertype for per-test result records. [`TestRecord`](@ref) is the
+default concrete subtype, carrying the captured test set and baseline timing /
+memory statistics. Custom subtypes can attach extra per-test data (e.g. GPU
+statistics) by carrying a `base::TestRecord` field and dispatching
+[`execute`](@ref) on the new type. See the `RecordType` argument of
+[`runtests`](@ref) for how to plug a custom record type into a run.
+"""
 abstract type AbstractTestRecord end
 
+"""
+    TestRecord <: AbstractTestRecord
+
+Default per-test record. Holds the captured `DefaultTestSet` alongside the
+baseline timing and memory statistics that [`runtests`](@ref) prints and
+persists. Custom [`AbstractTestRecord`](@ref) subtypes wrap a `TestRecord` in a
+`base` field; [`parent`](@ref) returns that baseline so the default `print_*`
+methods work unchanged.
+"""
 struct TestRecord <: AbstractTestRecord
     value::DefaultTestSet
 
@@ -93,12 +128,24 @@ struct TestRecord <: AbstractTestRecord
     total_time::Float64
 end
 
-function memory_usage(rec::TestRecord)
-    return rec.rss
+"""
+    parent(rec::AbstractTestRecord) -> TestRecord
+
+Return the [`TestRecord`](@ref) baseline that a custom record type wraps. By
+default, subtypes of `AbstractTestRecord` are expected to carry a
+`base::TestRecord` field; override `parent` for a different layout. The default
+`print_*` methods read baseline fields through `parent`, so wrapped types
+inherit the standard output unchanged.
+"""
+Base.parent(rec::AbstractTestRecord) = rec.base
+Base.parent(rec::TestRecord) = rec
+
+function memory_usage(rec::AbstractTestRecord)
+    return parent(rec).rss
 end
 
-function Base.getindex(rec::TestRecord)
-    return rec.value
+function Base.getindex(rec::AbstractTestRecord)
+    return parent(rec).value
 end
 
 
@@ -121,7 +168,7 @@ struct TestIOContext
     rss_align::Int
 end
 
-function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, verbose::Bool)
+function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, verbose::Bool)
     elapsed_align = textwidth("time (s)")
     compile_align = textwidth("Compile")
     gc_align = textwidth("GC (s)")
@@ -137,11 +184,11 @@ function test_IOContext(stdout::IO, stderr::IO, lock::ReentrantLock, name_align:
     )
 end
 
-function print_header(ctx::TestIOContext, testgroupheader, workerheader)
+function print_header(::Type{<:AbstractTestRecord}, ctx::TestIOContext, testgroupheader, workerheader)
     lock(ctx.lock)
     try
         # header top
-        printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ")
+        printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ", color = :white)
         printstyled(ctx.stdout, "  Test   │", color = :white)
         ctx.verbose && printstyled(ctx.stdout, "   Init   │", color = :white)
         VERSION >= v"1.11" && ctx.verbose && printstyled(ctx.stdout, " Compile │", color = :white)
@@ -160,7 +207,7 @@ function print_header(ctx::TestIOContext, testgroupheader, workerheader)
     end
 end
 
-function print_test_started(wrkr, test, ctx::TestIOContext)
+function print_test_started(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stdout, test, lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │", color = :white)
@@ -174,35 +221,36 @@ function print_test_started(wrkr, test, ctx::TestIOContext)
     end
 end
 
-function print_test_finished(record::TestRecord, wrkr, test, ctx::TestIOContext)
+function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIOContext)
+    base = parent(record)
     lock(ctx.lock)
     try
         printstyled(ctx.stdout, test, color = :white)
         printstyled(ctx.stdout, lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │ ", color = :white)
 
-        time_str = @sprintf("%7.2f", record.time)
+        time_str = @sprintf("%7.2f", base.time)
         printstyled(ctx.stdout, lpad(time_str, ctx.elapsed_align, " "), " │ ", color = :white)
 
         if ctx.verbose
             # pre-testset time
-            init_time_str = @sprintf("%7.2f", record.total_time - record.time)
+            init_time_str = @sprintf("%7.2f", base.total_time - base.time)
             printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align, " "), " │ ", color = :white)
 
             # compilation time
             if VERSION >= v"1.11"
-                init_time_str = @sprintf("%7.2f", Float64(100*record.compile_time/record.time))
+                init_time_str = @sprintf("%7.2f", Float64(100*base.compile_time/base.time))
                 printstyled(ctx.stdout, lpad(init_time_str, ctx.compile_align, " "), " │ ", color = :white)
             end
         end
 
-        gc_str = @sprintf("%5.2f", record.gctime)
+        gc_str = @sprintf("%5.2f", base.gctime)
         printstyled(ctx.stdout, lpad(gc_str, ctx.gc_align, " "), " │ ", color = :white)
-        percent_str = @sprintf("%4.1f", 100 * record.gctime / record.time)
+        percent_str = @sprintf("%4.1f", 100 * base.gctime / base.time)
         printstyled(ctx.stdout, lpad(percent_str, ctx.percent_align, " "), " │ ", color = :white)
-        alloc_str = @sprintf("%5.2f", record.bytes / 2^20)
+        alloc_str = @sprintf("%5.2f", base.bytes / 2^20)
         printstyled(ctx.stdout, lpad(alloc_str, ctx.alloc_align, " "), " │ ", color = :white)
 
-        rss_str = @sprintf("%5.2f", record.rss / 2^20)
+        rss_str = @sprintf("%5.2f", memory_usage(record) / 2^20)
         printstyled(ctx.stdout, lpad(rss_str, ctx.rss_align, " "), " │\n", color = :white)
 
         flush(ctx.stdout)
@@ -211,7 +259,8 @@ function print_test_finished(record::TestRecord, wrkr, test, ctx::TestIOContext)
     end
 end
 
-function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
+function print_test_failed(record::AbstractTestRecord, wrkr, test, ctx::TestIOContext)
+    base = parent(record)
     lock(ctx.lock)
     try
         printstyled(ctx.stderr, test, color = :red)
@@ -221,11 +270,11 @@ function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
             , color = :red
         )
 
-        time_str = @sprintf("%7.2f", record.time)
+        time_str = @sprintf("%7.2f", base.time)
         printstyled(ctx.stderr, lpad(time_str, ctx.elapsed_align + 1, " "), " │", color = :red)
 
         if ctx.verbose
-            init_time_str = @sprintf("%7.2f", record.total_time - record.time)
+            init_time_str = @sprintf("%7.2f", base.total_time - base.time)
             printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align + 1, " "), " │ ", color = :red)
         end
 
@@ -243,7 +292,7 @@ function print_test_failed(record::TestRecord, wrkr, test, ctx::TestIOContext)
     end
 end
 
-function print_test_crashed(wrkr, test, ctx::TestIOContext)
+function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
         printstyled(ctx.stderr, test, color = :red)
@@ -260,11 +309,11 @@ function print_test_crashed(wrkr, test, ctx::TestIOContext)
 end
 
 # Adapted from `Malt._stdio_loop`
-function stdio_loop(worker::Malt.Worker, io, io_lock::ReentrantLock)
+function stdio_loop(worker::Malt.Worker, io::Lockable)
     Threads.@spawn while !eof(worker.stdout) && Malt.isrunning(worker)
         try
             bytes = readavailable(worker.stdout)
-            @lock io_lock write(io, bytes)
+            @lock io write(io[], bytes)
         catch
             break
         end
@@ -272,7 +321,7 @@ function stdio_loop(worker::Malt.Worker, io, io_lock::ReentrantLock)
     Threads.@spawn while !eof(worker.stderr) && Malt.isrunning(worker)
         try
             bytes = readavailable(worker.stderr)
-            @lock io_lock write(io, bytes)
+            @lock io write(io[], bytes)
         catch
             break
         end
@@ -313,7 +362,59 @@ function Test.finish(ts::WorkerTestSet)
     return ts.wrapped_ts
 end
 
-function runtest(f, name, init_code, start_time)
+"""
+    execute(::Type{R}, mod::Module, f, name, start_time, custom_args) where {R<:AbstractTestRecord}
+
+Run the test expression `f` inside the sandbox module `mod` and return an
+`R <: AbstractTestRecord`. This is the extension point for custom record
+types: dispatch `execute(::Type{MyRecord}, …)` to collect additional per-test
+statistics without re-implementing the sandbox scaffolding.
+
+The default method for [`TestRecord`](@ref) wraps the test set in a
+[`WorkerTestSet`](@ref) placeholder (so `DefaultTestSet` doesn't swallow
+results at the top level), captures `@timed` stats, and records `Sys.maxrss()`.
+Custom implementations commonly call `execute(TestRecord, mod, f, name,
+start_time, custom_args)` to reuse that baseline and wrap the returned record
+in a new record type.
+
+Arguments:
+
+- `mod` — the per-test sandbox module; the test expression `f` is evaluated
+  into it via `@eval mod`.
+- `f` — the test expression from the `testsuite` dictionary.
+- `name` — the test name (used as the top-level `@testset` name).
+- `start_time` — wall-clock time at which the scheduler picked up this test;
+  subtract from `time()` to get total elapsed time including worker wait.
+- `custom_args` — the `custom_args` value forwarded from [`runtests`](@ref)
+  (arbitrary, typically a `NamedTuple`).
+"""
+function execute(::Type{TestRecord}, mod::Module, f, name, start_time, custom_args)
+    data = @eval mod begin
+        GC.gc(true)
+        Random.seed!(1)
+
+        # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
+        # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
+        # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
+        stats = @timed @testset WorkerTestSet "placeholder" begin
+            @testset DefaultTestSet $name begin
+                $f
+            end
+        end
+
+        compile_time = @static VERSION >= v"1.11" ? stats.compile_time : 0.0
+        (; testset=stats.value, stats.time, stats.bytes, stats.gctime, compile_time)
+    end
+
+    # process results
+    rss = Sys.maxrss()
+    record = TestRecord(data..., rss, time() - start_time)
+
+    GC.gc(true)
+    return record
+end
+
+function runtest(RecordType::Type{<:AbstractTestRecord}, f, name, init_code, start_time, custom_args)
     function inner()
         # generate a temporary module to execute the tests in
         mod = @eval(Main, module $(gensym(name)) end)
@@ -325,29 +426,7 @@ function runtest(f, name, init_code, start_time)
 
         Core.eval(mod, init_code)
 
-        data = @eval mod begin
-            GC.gc(true)
-            Random.seed!(1)
-
-            # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
-            # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
-            # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
-            stats = @timed @testset WorkerTestSet "placeholder" begin
-                @testset DefaultTestSet $name begin
-                    $f
-                end
-            end
-
-            compile_time = @static VERSION >= v"1.11" ? stats.compile_time : 0.0
-            (; testset=stats.value, stats.time, stats.bytes, stats.gctime, compile_time)
-        end
-
-        # process results
-        rss = Sys.maxrss()
-        record = TestRecord(data..., rss, time() - start_time)
-
-        GC.gc(true)
-        return record
+        return execute(RecordType, mod, f, name, start_time, custom_args)
     end
 
     @static if VERSION >= v"1.13.0-DEV.1044"
@@ -510,10 +589,16 @@ function addworker(;
         exeflags = exe[2:end]
     end
 
-    push!(env, "JULIA_NUM_THREADS" => "1")
+    # don't mutate the caller's vector; multiple workers may share a default
+    worker_env = copy(env)
+    push!(worker_env, "JULIA_NUM_THREADS" => "1")
     # Malt already sets OPENBLAS_NUM_THREADS to 1
-    push!(env, "OPENBLAS_NUM_THREADS" => "1")
-    wrkr =  PTRWorker(; exename, exeflags, env)
+    push!(worker_env, "OPENBLAS_NUM_THREADS" => "1")
+    wrkr = PTRWorker(; exename, exeflags, env = worker_env)
+    # make ParallelTestRunner available to `init_worker_code`; users commonly
+    # need it to reference `AbstractTestRecord`, `execute`, etc. when defining
+    # custom record types.
+    Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
     if init_worker_code != :()
         Malt.remote_eval_wait(Main, wrkr.w, init_worker_code)
     end
@@ -676,8 +761,16 @@ end
 Filter tests in `testsuite` based on command-line arguments in `args`.
 
 Returns `true` if additional filtering may be done by the caller, `false` otherwise.
+
+When `--list` is requested, the full `testsuite` is preserved and `false` is
+returned so that callers skip any conditional filtering of their own: listing
+should show every available test, not just the ones that would run by default.
 """
 function filter_tests!(testsuite, args::ParsedArgs)
+    # when only listing tests, keep the full catalog and let the caller skip its
+    # own filtering, so that every available test is shown
+    args.list !== nothing && return false
+
     # the user did not request specific tests, so let the caller do its own filtering
     isempty(args.positionals) && return true
 
@@ -717,6 +810,11 @@ end
              init_code = :(),
              init_worker_code = :(),
              test_worker = Returns(nothing),
+             RecordType::Type{<:AbstractTestRecord} = TestRecord,
+             custom_args = (;),
+             exename = nothing,
+             exeflags = nothing,
+             env = Vector{Pair{String, String}}(),
              stdout = Base.stdout,
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss(),
@@ -743,6 +841,25 @@ Several keyword arguments are also supported:
 - `init_worker_code`: Code use to initialize each worker. This is run only once per worker instead of once per test.
 - `test_worker`: Optional function that takes a test name and `init_worker_code` if `init_worker_code` is defined and returns a specific worker.
   When returning `nothing`, the test will be assigned to any available default worker.
+- `RecordType`: Concrete subtype of [`AbstractTestRecord`](@ref) used to collect
+  per-test statistics. Defaults to [`TestRecord`](@ref). To extend the default
+  record with extra data, define `struct MyRecord <: AbstractTestRecord;
+  base::TestRecord; …; end` and dispatch [`execute`](@ref) on the new type —
+  typically by calling `execute(TestRecord, mod, f, name, start_time,
+  custom_args)` and wrapping the result. The default `print_*` methods read
+  baseline fields through [`parent`](@ref), so wrapped types inherit the
+  standard output; override `print_*` only when you need different layout.
+  The record type must be defined on both the main process and all workers
+  (e.g. via `init_worker_code`) since it crosses the Malt serialization
+  boundary.
+- `custom_args`: Arbitrary value (typically a `NamedTuple`) forwarded to
+  [`execute`](@ref). Lets callers thread per-run configuration into a custom
+  `RecordType`'s `execute` method without going through `init_code`.
+- `exename`, `exeflags`, `env`: Forwarded to every internal `addworker` call, so
+  they affect all default-pool workers (and any respawns). `exename` may be a
+  `String` or a `Cmd` — passing a `Cmd` lets callers wrap the julia invocation
+  with a tool such as `compute-sanitizer`. Custom workers created from inside a
+  `test_worker` hook are the caller's responsibility.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
 - `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time
@@ -832,8 +949,17 @@ issues during long test runs. The memory limit is set based on system architectu
 function runtests(mod::Module, args::ParsedArgs;
                   testsuite::Dict{String,Expr} = find_tests(pwd()),
                   init_code = :(), init_worker_code = :(), test_worker = Returns(nothing),
-                  stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss(),
-                  serial::Vector{String} = String[], serial_position::Symbol = :before)
+                  RecordType::Type{<:AbstractTestRecord} = TestRecord,
+                  custom_args = (;),
+                  exename = nothing,
+                  exeflags = nothing,
+                  env = Vector{Pair{String, String}}(),
+                  serial::Vector{String} = String[],
+                  serial_position::Symbol = :before,
+                  stdout = Base.stdout,
+                  stderr = Base.stderr,
+                  max_worker_rss = get_max_worker_rss(),
+                  )
     #
     # set-up
     #
@@ -880,10 +1006,8 @@ function runtests(mod::Module, args::ParsedArgs;
     !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
 
     t0 = time()
-    results = []
-    running_tests = Dict{String, Float64}()  # test => start_time
-    test_lock = ReentrantLock() # to protect crucial access to tests and running_tests
-    results_lock = ReentrantLock() # to protect concurrent access to results
+    results = Lockable([])
+    running_tests = Lockable(Dict{String, Float64}())  # test => start_time
 
     worker_tasks = Task[]
 
@@ -929,8 +1053,8 @@ function runtests(mod::Module, args::ParsedArgs;
         stderr.lock = print_lock
     end
 
-    io_ctx = test_IOContext(stdout, stderr, print_lock, name_align, !isnothing(args.verbose))
-    print_header(io_ctx, testgroupheader, workerheader)
+    io_ctx = test_IOContext(RecordType, stdout, stderr, print_lock, name_align, !isnothing(args.verbose))
+    print_header(RecordType, io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
 
@@ -946,16 +1070,19 @@ function runtests(mod::Module, args::ParsedArgs;
     end
 
     function update_status()
-        # only draw if we have something to show
-        isempty(running_tests) && return
-        completed = Base.@lock results_lock length(results)
+        # take consistent snapshots once, so the rest of this function operates on
+        # frozen data rather than racing with workers that mutate these collections
+        running_snapshot = @lock running_tests copy(running_tests[])
+        isempty(running_snapshot) && return
+        results_snapshot = @lock results copy(results[])
+        completed = length(results_snapshot)
         total = length(tests)
 
         # line 1: empty line
         line1 = ""
 
         # line 2: running tests
-        test_list = sort(collect(keys(running_tests)), by = x -> running_tests[x])
+        test_list = sort(collect(keys(running_snapshot)), by = x -> running_snapshot[x])
         status_parts = map(test_list) do test
             "$test"
         end
@@ -970,23 +1097,23 @@ function runtests(mod::Module, args::ParsedArgs;
         line3 = "Progress: $completed/$total tests completed"
         if completed > 0
             # estimate per-test time (slightly pessimistic)
-            durations_done = Base.@lock results_lock [end_time - start_time for (_, _,_, start_time, end_time) in results]
+            durations_done = [end_time - start_time for (_, _,_, start_time, end_time) in results_snapshot]
             μ = mean(durations_done)
             σ = length(durations_done) > 1 ? std(durations_done) : 0.0
             est_per_test = μ + 0.5σ
 
             est_remaining = 0.0
             ## currently-running
-            for (test, start_time) in running_tests
+            for (test, start_time) in running_snapshot
                 elapsed = time() - start_time
                 duration = get(historical_durations, test, est_per_test)
                 est_remaining += max(0.0, duration - elapsed)
             end
             ## yet-to-run
             for test in tests
-                haskey(running_tests, test) && continue
+                haskey(running_snapshot, test) && continue
                 # Test is in any completed test
-                any(r -> test == r.test, results) && continue
+                any(r -> test == r.test, results_snapshot) && continue
                 est_remaining += get(historical_durations, test, est_per_test)
             end
 
@@ -1030,7 +1157,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         # Optionally print verbose started message
                         if args.verbose !== nothing
                             clear_status()
-                            print_test_started(wrkr, test_name, io_ctx)
+                            print_test_started(RecordType, wrkr, test_name, io_ctx)
                         end
 
                     elseif msg_type == :finished
@@ -1047,7 +1174,7 @@ function runtests(mod::Module, args::ParsedArgs;
                         test_name, wrkr = msg[2], msg[3]
 
                         clear_status()
-                        print_test_crashed(wrkr, test_name, io_ctx)
+                        print_test_crashed(RecordType, wrkr, test_name, io_ctx)
                     end
                 end
 
@@ -1069,7 +1196,9 @@ function runtests(mod::Module, args::ParsedArgs;
             end
             isa(ex, InterruptException) || rethrow()
         finally
-            if isempty(running_tests) && length(results) >= length(tests)
+            n_running = @lock running_tests length(running_tests[])
+            n_results = @lock results length(results[])
+            if n_running == 0 && n_results >= length(tests)
                 # XXX: only erase the status if we completed successfully.
                 #      in other cases we'll have printed "caught interrupt"
                 clear_status()
@@ -1124,9 +1253,9 @@ function runtests(mod::Module, args::ParsedArgs;
 
                               done && return
 
-                              test_t0 = Base.@lock test_lock begin
+                              test_t0 = @lock running_tests begin
                                   test_t0 = time()
-                                  running_tests[test] = test_t0
+                                  running_tests[][test] = test_t0
                               end
 
                               # pass in init_worker_code to custom worker function if defined
@@ -1140,7 +1269,8 @@ function runtests(mod::Module, args::ParsedArgs;
                               end
                               # if a worker failed, spawn a new one
                               if wrkr === nothing || !Malt.isrunning(wrkr)
-                                  wrkr = p = addworker(; init_worker_code, io_ctx.color)
+                                  wrkr = p = addworker(; init_worker_code, io_ctx.color,
+                                                       exename, exeflags, env)
                               end
 
                               # run the test
@@ -1148,7 +1278,8 @@ function runtests(mod::Module, args::ParsedArgs;
                               result = try
                                   Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
                                   Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
-                                                         testsuite[test], test, init_code, test_t0)
+                                                         RecordType, testsuite[test], test,
+                                                         init_code, test_t0, custom_args)
                               catch ex
                                   if isa(ex, InterruptException)
                                       # the worker got interrupted, signal other tasks to stop
@@ -1159,8 +1290,8 @@ function runtests(mod::Module, args::ParsedArgs;
                                   ex
                               end
                               test_t1 = time()
-                              output = Base.@lock wrkr.io_lock String(take!(wrkr.io))
-                              Base.@lock results_lock push!(results, (; test, result, output, test_t0, test_t1))
+                              output = @lock wrkr.io String(take!(wrkr.io[]))
+                              @lock results push!(results[], (; test, result, output, test_t0, test_t1))
 
                               # act on the results
                               if result isa AbstractTestRecord
@@ -1193,8 +1324,8 @@ function runtests(mod::Module, args::ParsedArgs;
                                   Malt.stop(wrkr)
                               end
 
-                              Base.@lock test_lock begin
-                                  delete!(running_tests, test)
+                              @lock running_tests begin
+                                  delete!(running_tests[], test)
                               end
                           catch ex
                               isa(ex, InterruptException) || rethrow()
@@ -1268,10 +1399,11 @@ function runtests(mod::Module, args::ParsedArgs;
     end
 
     # print the output generated by each testset
-    for (testname, result, output, _start, _stop) in results
+    # (`@sync` above joined all writers, so `results` is quiescent from here on)
+    for (testname, result, output, _start, _stop) in results.value
         if !isempty(output)
             print(io_ctx.stdout, "\nOutput generated during execution of '")
-            if result isa Exception || anynonpass(result.value)
+            if result isa Exception || anynonpass(result[])
                 printstyled(io_ctx.stdout, testname; color=:red)
             else
                 printstyled(io_ctx.stdout, testname; color=:normal)
@@ -1326,7 +1458,7 @@ function runtests(mod::Module, args::ParsedArgs;
     function collect_results()
         with_testset(o_ts) do
             completed_tests = Set{String}()
-            for (testname, result, _output, start, stop) in results
+            for (testname, result, _output, start, stop) in results.value
                 push!(completed_tests, testname)
 
                 if result isa AbstractTestRecord
