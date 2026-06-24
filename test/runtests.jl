@@ -790,6 +790,39 @@ end
     @test any(contains("--color=yes"), exe.exec)
 end
 
+@testset "TestHistoryEntry" begin
+    import ParallelTestRunner: TestHistoryEntry
+
+    flow = TestHistoryEntry(1,true)
+    fhigh = TestHistoryEntry(10,true)
+
+    slow = TestHistoryEntry(1,false)
+    shigh = TestHistoryEntry(10,false)
+
+    # irreflexive: lt(x, x) always yields false
+    @test !isless(flow, flow)
+    @test !isless(slow, slow)
+    @test !isless(fhigh, fhigh)
+    @test !isless(shigh, shigh)
+
+    # asymmetric: if lt(x, y) yields true then lt(y, x) yields false
+    @test isless(flow, fhigh)
+    @test !isless(fhigh, flow)
+    @test isless(shigh, flow)
+    @test !isless(flow, shigh)
+
+    # transitive: lt(x, y) && lt(y, z) implies lt(x, z)
+    @test isless(slow, shigh)
+    @test isless(shigh, flow)
+    @test isless(slow, flow)
+
+    # addition/subtraction with Float64
+    @test TestHistoryEntry(1, true) + 1.0 == 2.0
+    @test TestHistoryEntry(3, false) - 1.0 == 2.0
+    @test TestHistoryEntry(1, false) + 1.0 == 2.0
+    @test TestHistoryEntry(3, true) - 1.0 == 2.0
+end
+
 # ── Integration tests ────────────────────────────────────────────────────────
 
 @testset "non-verbose mode" begin
