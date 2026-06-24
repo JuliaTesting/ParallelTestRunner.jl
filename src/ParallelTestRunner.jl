@@ -510,6 +510,18 @@ function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_
 end
 
 # Historical test duration database
+struct TestHistoryEntry <: AbstractFloat
+    duration::Float64
+    failed::Bool
+end
+# successful tests are sorted before failed ones, so they always run first
+Base.isless(a::TestHistoryEntry, b::TestHistoryEntry) = a.failed == b.failed ? a.duration < b.duration : a.failed < b.failed
+Base.promote_rule(::Type{T}, ::Type{TestHistoryEntry}) where {T} = promote_type(T, Float64)
+Base.promote_rule(::Type{TestHistoryEntry}, ::Type{T}) where {T} = promote_type(Float64,T)
+# for compatibility with older versions of ParallelTestRunner
+Base.convert(::Type{TestHistoryEntry}, duration::Number) = TestHistoryEntry(duration, false)
+Base.convert(::Type{Float64}, entry::TestHistoryEntry) = entry.duration
+
 function get_history_file(mod::Module)
     scratch_dir = @get_scratch!("durations")
     return joinpath(scratch_dir, "v$(VERSION.major).$(VERSION.minor)", "$(nameof(mod)).jls")
@@ -518,16 +530,17 @@ function load_test_history(mod::Module)
     history_file = get_history_file(mod)
     if isfile(history_file)
         try
-            return deserialize(history_file)
+            hist::Dict{String, TestHistoryEntry} = deserialize(history_file)
+            return hist
         catch e
             @warn "Failed to load test history from $history_file" exception=e
-            return Dict{String, Float64}()
+            return Dict{String, TestHistoryEntry}()
         end
     else
-        return Dict{String, Float64}()
+        return Dict{String, TestHistoryEntry}()
     end
 end
-function save_test_history(mod::Module, history::Dict{String, Float64})
+function save_test_history(mod::Module, history::Dict{String, TestHistoryEntry})
     history_file = get_history_file(mod)
     try
         mkpath(dirname(history_file))
@@ -943,7 +956,7 @@ function runtests(mod::Module, args::ParsedArgs;
     tests = collect(keys(testsuite))
     Random.shuffle!(tests)
     historical_durations = load_test_history(mod)
-    sort!(tests, by = x -> -get(historical_durations, x, Inf))
+    sort!(tests, by = x -> get(historical_durations, x, Inf), rev = true)
 
     # determine parallelism
     jobs = something(args.jobs, default_njobs())
@@ -1047,7 +1060,7 @@ function runtests(mod::Module, args::ParsedArgs;
             ## currently-running
             for (test, start_time) in running_snapshot
                 elapsed = time() - start_time
-                duration = get(historical_durations, test, est_per_test)
+                duration::Float64 = get(historical_durations, test, est_per_test)
                 est_remaining += max(0.0, duration - elapsed)
             end
             ## yet-to-run
@@ -1357,7 +1370,7 @@ function runtests(mod::Module, args::ParsedArgs;
 
                 if result isa AbstractTestRecord
                     testset = result[]::DefaultTestSet
-                    historical_durations[testname] = stop - start
+                    historical_durations[testname] = TestHistoryEntry(stop - start, anynonpass(testset))
                 else
                     # If this test raised an exception that means the test runner itself had some problem,
                     # so we may have hit a segfault, deserialization errors or something similar.
@@ -1366,6 +1379,7 @@ function runtests(mod::Module, args::ParsedArgs;
                     @assert result isa Exception
                     testset = create_testset(testname; start, stop)
                     Test.record(testset, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = result, backtrace = [])]), LineNumberNode(1)))
+                    historical_durations[testname] = TestHistoryEntry(Inf, true)
                 end
 
                 with_testset(testset) do
