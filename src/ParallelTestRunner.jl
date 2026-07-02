@@ -923,6 +923,7 @@ function runtests(mod::Module, args::ParsedArgs;
                   exeflags = nothing,
                   env = Vector{Pair{String, String}}(),
                   stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss())
+
     #
     # set-up
     #
@@ -944,6 +945,43 @@ function runtests(mod::Module, args::ParsedArgs;
     Random.shuffle!(tests)
     historical_durations = load_test_history(mod)
     sort!(tests, by = x -> -get(historical_durations, x, Inf))
+
+    return _runtests(
+        mod, args;
+        testsuite,
+        tests,
+        historical_durations,
+        init_code,
+        init_worker_code,
+        test_worker,
+        RecordType,
+        custom_args,
+        exename,
+        exeflags,
+        env,
+        stdout,
+        stderr,
+        max_worker_rss,
+    )
+end
+
+# Helper function, to be used for testing, with `tests` already sorted.
+function _runtests(mod::Module, args::ParsedArgs;
+                   testsuite::Dict{String,Expr} = find_tests(pwd()),
+                   tests::Vector{String},
+                   historical_durations::Dict{String, Float64},
+                   init_code = :(),
+                   init_worker_code = :(),
+                   test_worker = Returns(nothing),
+                   RecordType::Type{<:AbstractTestRecord} = TestRecord,
+                   custom_args = (;),
+                   exename = nothing,
+                   exeflags = nothing,
+                   env = Vector{Pair{String, String}}(),
+                   stdout = Base.stdout,
+                   stderr = Base.stderr,
+                   max_worker_rss = get_max_worker_rss(),
+                   )
 
     # determine parallelism
     jobs = something(args.jobs, default_njobs())
@@ -973,7 +1011,6 @@ function runtests(mod::Module, args::ParsedArgs;
             end
         end
     end
-
 
     #
     # output
@@ -1426,6 +1463,7 @@ function runtests(mod::Module, args::ParsedArgs;
 
     return
 end
+
 runtests(mod::Module, ARGS::Array{String}; kwargs...) = runtests(mod, parse_args(ARGS); kwargs...)
 
 end
