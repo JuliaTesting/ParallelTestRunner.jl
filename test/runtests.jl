@@ -5,6 +5,10 @@ cd(@__DIR__)
 
 include(joinpath(@__DIR__, "utils.jl"))
 
+# dummy module to give the "test start order" testset its own history file,
+# without clobbering the history of `ParallelTestRunner` used by other testsets
+module SortingHistoryDummy end
+
 @testset "ParallelTestRunner" verbose=true begin
 
 @testset "basic use" begin
@@ -69,6 +73,34 @@ end
     @test !contains(str, r"basic .+ started at")
     @test contains(str, r"custom .+ started at")
     @test contains(str, "SUCCESS")
+end
+
+@testset "test start order" begin
+    # tests must start in descending order of historical duration, regardless of
+    # the number of threads of this process (issue #139)
+    testsuite = Dict(
+        name => :(@test true)
+        for name in ("sort1", "sort2", "sort3", "sort4", "sort5")
+    )
+    # deliberately not in alphabetical order, so that tests accidentally started in
+    # alphabetical (or insertion) order would not pass the test below
+    expected_order = ["sort3", "sort1", "sort5", "sort2", "sort4"]
+    ParallelTestRunner.save_test_history(SortingHistoryDummy,
+        Dict(name => Float64(length(expected_order) - idx)
+             for (idx, name) in enumerate(expected_order)))
+
+    io = IOBuffer()
+    # with a single job, tests start strictly in acquisition order
+    runtests(SortingHistoryDummy, ["--jobs=1", "--verbose"]; testsuite, stdout=io, stderr=io)
+
+    str = String(take!(io))
+    @test contains(str, "SUCCESS")
+    started_at = map(expected_order) do name
+        m = match(Regex("$(name) .+ started at"), str)
+        @test m !== nothing
+        m === nothing ? typemax(Int) : m.offset
+    end
+    @test issorted(started_at)
 end
 
 @testset "init code" begin
