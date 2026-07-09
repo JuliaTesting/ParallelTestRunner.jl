@@ -40,12 +40,37 @@ include(joinpath(@__DIR__, "utils.jl"))
 end
 
 @testset "default njobs" begin
-    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 28) == 1
-    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 30) == 1
-    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 31) == 1
-    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 32) == 2
-    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 33) == 4
-    @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 34) == 4
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, total_memory=UInt64(2) ^ 28) == 1
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, total_memory=UInt64(2) ^ 30) == 1
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, total_memory=UInt64(2) ^ 31) == 2
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, total_memory=UInt64(2) ^ 32) == 4
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, total_memory=UInt64(2) ^ 33) == 4
+
+    # heavier per-worker memory estimate lowers the default
+    @test ParallelTestRunner.default_njobs(; cpu_threads=4, total_memory=UInt64(2) ^ 32,
+                                             memory_per_worker=2 * Int64(2) ^ 30) == 2
+end
+
+@testset "number of jobs" begin
+    testsuite = Dict(
+        "t1" => :(@test true),
+        "t2" => :(@test true),
+        "t3" => :(@test true),
+    )
+
+    # environment variable overrides the default
+    io = IOBuffer()
+    withenv("PARALLELTESTRUNNER_NUM_JOBS" => "2") do
+        runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io)
+    end
+    @test contains(String(take!(io)), "using 2 parallel jobs")
+
+    # --jobs takes precedence over the environment variable
+    io = IOBuffer()
+    withenv("PARALLELTESTRUNNER_NUM_JOBS" => "2") do
+        runtests(ParallelTestRunner, ["--jobs=1"]; testsuite, stdout=io, stderr=io)
+    end
+    @test contains(String(take!(io)), "using 1 parallel jobs")
 end
 
 @testset "subdir use" begin
