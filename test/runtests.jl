@@ -71,6 +71,36 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "test start order" begin
+    # Tests must start in the given order, regardless of the
+    # number of threads of the host Julia process (issue #139).
+    testsuite = Dict(
+        "sort$(n)" => :(@test true)
+        for n in 1:5
+    )
+    tests = ["sort$(n)" for n in 1:length(testsuite)]
+
+    io = IOBuffer()
+    # with a single job, tests start strictly in acquisition order
+    ParallelTestRunner._runtests(
+        ParallelTestRunner, parse_args(["--jobs=1", "--verbose"]);
+        testsuite,
+        tests,
+        historical_durations=Dict{String, Float64}(),
+        stdout=io,
+        stderr=io,
+    )
+
+    str = String(take!(io))
+    @test contains(str, "SUCCESS")
+    started_at = map(tests) do name
+        m = match(Regex("$(name) .+ started at"), str)
+        @test m !== nothing
+        m === nothing ? typemax(Int) : m.offset
+    end
+    @test issorted(started_at)
+end
+
 @testset "init code" begin
     init_code = quote
         using Test

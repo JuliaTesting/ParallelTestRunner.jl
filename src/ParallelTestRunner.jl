@@ -1189,10 +1189,12 @@ function _runtests(mod::Module, args::ParsedArgs;
     #
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
+    next_test = Threads.Atomic{Int}(1)
     try
-        @sync for test in tests
+        @sync for _ in 1:length(tests)
             push!(worker_tasks, Threads.@spawn begin
                 local p = nothing
+                local test
                 acquired = false
                 try
                     Base.acquire(sem)
@@ -1201,6 +1203,11 @@ function _runtests(mod::Module, args::ParsedArgs;
                     Threads.atomic_sub!(tests_to_start, 1)
 
                     done && return
+
+                    # with multiple threads, tasks reach this point in arbitrary order,
+                    # so pick the next test to run only now, rather than at spawn time,
+                    # to preserve the sorted test order (issue #139)
+                    test = tests[Threads.atomic_add!(next_test, 1)]
 
                     test_t0 = @lock running_tests begin
                         test_t0 = time()
