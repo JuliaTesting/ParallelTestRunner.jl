@@ -490,9 +490,69 @@ function available_memory()
 	return (Int(vms[].free_count) + Int(vms[].inactive_count) + Int(vms[].purgeable_count) + Int(vms[].compressor_page_count)) * page_size
 end
 
+function print_memory_stats(io::IO=stdout)
+   	vms = Ref{VmStatistics64}(VmStatistics64())
+	mach_host_self = @ccall mach_host_self()::UInt32
+	count = UInt32(sizeof(VmStatistics64) ÷ sizeof(Int32))
+	ref_count = Ref(count)
+	@ccall host_statistics64(mach_host_self::UInt32, 4::Int64, pointer_from_objref(vms[])::Ptr{Int64}, ref_count::Ref{UInt32})::Int64
+
+	page_size = Int(@ccall sysconf(29::UInt32)::UInt32)
+	println(io, "VmStatistics64: ")
+	println(io, "  Available memory: ", Base.format_bytes((vms[].free_count + vms[].inactive_count + vms[].purgeable_count + vms[].compressor_page_count) * page_size))
+	println(io, "\n  free_count: ", Base.format_bytes(vms[].free_count * page_size))
+	println(io, "  active_count: ", Base.format_bytes(vms[].active_count * page_size))
+	println(io, "  inactive_count: ", Base.format_bytes(vms[].inactive_count * page_size))
+	println(io, "  wire_count: ", Base.format_bytes(vms[].wire_count * page_size))
+	println(io, "  purgeable_count: ", Base.format_bytes(vms[].purgeable_count * page_size))
+	println(io, "  speculative_count: ", Base.format_bytes(vms[].speculative_count * page_size))
+	println(io, "  compressor_page_count: ", Base.format_bytes(vms[].compressor_page_count * page_size))
+	println(io, "  throttled_count: ", Base.format_bytes(vms[].throttled_count * page_size))
+	println(io, "  external_page_count: ", Base.format_bytes(vms[].external_page_count * page_size))
+	println(io, "  internal_page_count: ", Base.format_bytes(vms[].internal_page_count * page_size))
+	println(io, "  total_uncompressed_pages_in_compressor: ", Base.format_bytes(vms[].total_uncompressed_pages_in_compressor * page_size))
+end
+
 else
 
 available_memory() = Sys.free_memory()
+
+if Sys.islinux()
+
+function read_meminfo()
+	fields = Dict{SubString{String}, UInt64}()
+	for line in eachline("/proc/meminfo")
+		key, rest = split(line, ':'; limit=2)
+		fields[key] = parse(UInt64, match(r"\d+", rest).match) * UInt64(1024)
+	end
+	return fields
+end
+
+
+function print_memory_stats(io::IO=stdout)
+	fields = read_meminfo()
+	println(io, "/proc/meminfo: ")
+	println(io, "  Available memory: ", Base.format_bytes(available_memory()))
+	println(io, "\n  MemTotal: ", Base.format_bytes(get(fields, "MemTotal", 0)))
+	println(io, "  MemFree: ", Base.format_bytes(get(fields, "MemFree", 0)))
+	println(io, "  Buffers: ", Base.format_bytes(get(fields, "Buffers", 0)))
+	println(io, "  Cached: ", Base.format_bytes(get(fields, "Cached", 0)))
+	println(io, "  SwapCached: ", Base.format_bytes(get(fields, "SwapCached", 0)))
+	println(io, "  SwapTotal: ", Base.format_bytes(get(fields, "SwapTotal", 0)))
+	println(io, "  SwapFree: ", Base.format_bytes(get(fields, "SwapFree", 0)))
+	println(io, "  Active: ", Base.format_bytes(get(fields, "Active", 0)))
+	println(io, "  Inactive: ", Base.format_bytes(get(fields, "Inactive", 0)))
+	println(io, "  Dirty: ", Base.format_bytes(get(fields, "Dirty", 0)))
+	println(io, "  Writeback: ", Base.format_bytes(get(fields, "Writeback", 0)))
+	println(io, "  Slab: ", Base.format_bytes(get(fields, "Slab", 0)))
+	println(io, "  Shmem: ", Base.format_bytes(get(fields, "Shmem", 0)))
+end
+
+else
+
+function print_memory_stats(io::IO=stdout)
+	println(io, "Available memory: ", Base.format_bytes(available_memory()))
+end
 
 end
 
