@@ -519,41 +519,38 @@ available_memory() = Sys.free_memory()
 
 if Sys.islinux()
 
-function read_meminfo()
-	fields = Dict{SubString{String}, UInt64}()
-	for line in eachline("/proc/meminfo")
-		key, rest = split(line, ':'; limit=2)
-		fields[key] = parse(UInt64, match(r"\d+", rest).match) * UInt64(1024)
-	end
-	return fields
-end
+    function read_meminfo()
+    	fields = Dict{SubString{String}, UInt64}()
+    	for line in eachline("/proc/meminfo")
+    		key, rest = split(line, ':'; limit=2)
+    		fields[key] = parse(UInt64, match(r"\d+", rest).match) * UInt64(1024)
+    	end
+    	return fields
+    end
 
-
-function print_memory_stats(io::IO=stdout)
-	fields = read_meminfo()
-	println(io, "/proc/meminfo: ")
-	println(io, "  Available memory: ", Base.format_bytes(available_memory()))
-	println(io, "\n  MemTotal: ", Base.format_bytes(get(fields, "MemTotal", 0)))
-	println(io, "  MemFree: ", Base.format_bytes(get(fields, "MemFree", 0)))
-	println(io, "  Buffers: ", Base.format_bytes(get(fields, "Buffers", 0)))
-	println(io, "  Cached: ", Base.format_bytes(get(fields, "Cached", 0)))
-	println(io, "  SwapCached: ", Base.format_bytes(get(fields, "SwapCached", 0)))
-	println(io, "  SwapTotal: ", Base.format_bytes(get(fields, "SwapTotal", 0)))
-	println(io, "  SwapFree: ", Base.format_bytes(get(fields, "SwapFree", 0)))
-	println(io, "  Active: ", Base.format_bytes(get(fields, "Active", 0)))
-	println(io, "  Inactive: ", Base.format_bytes(get(fields, "Inactive", 0)))
-	println(io, "  Dirty: ", Base.format_bytes(get(fields, "Dirty", 0)))
-	println(io, "  Writeback: ", Base.format_bytes(get(fields, "Writeback", 0)))
-	println(io, "  Slab: ", Base.format_bytes(get(fields, "Slab", 0)))
-	println(io, "  Shmem: ", Base.format_bytes(get(fields, "Shmem", 0)))
-end
-
+    function print_memory_stats(io::IO=stdout)
+    	fields = read_meminfo()
+    	println(io, "/proc/meminfo: ")
+    	println(io, "  Available memory: ", Base.format_bytes(available_memory()))
+    	println(io, "\n  MemTotal: ", Base.format_bytes(get(fields, "MemTotal", 0)))
+    	println(io, "  MemFree: ", Base.format_bytes(get(fields, "MemFree", 0)))
+    	println(io, "  Buffers: ", Base.format_bytes(get(fields, "Buffers", 0)))
+    	println(io, "  Cached: ", Base.format_bytes(get(fields, "Cached", 0)))
+    	println(io, "  SwapCached: ", Base.format_bytes(get(fields, "SwapCached", 0)))
+    	println(io, "  SwapTotal: ", Base.format_bytes(get(fields, "SwapTotal", 0)))
+    	println(io, "  SwapFree: ", Base.format_bytes(get(fields, "SwapFree", 0)))
+    	println(io, "  Active: ", Base.format_bytes(get(fields, "Active", 0)))
+    	println(io, "  Inactive: ", Base.format_bytes(get(fields, "Inactive", 0)))
+    	println(io, "  Dirty: ", Base.format_bytes(get(fields, "Dirty", 0)))
+    	println(io, "  Writeback: ", Base.format_bytes(get(fields, "Writeback", 0)))
+    	println(io, "  Slab: ", Base.format_bytes(get(fields, "Slab", 0)))
+    	println(io, "  Shmem: ", Base.format_bytes(get(fields, "Shmem", 0)))
+    end
 else
-
-function print_memory_stats(io::IO=stdout)
-	println(io, "Available memory: ", Base.format_bytes(available_memory()))
+    function print_memory_stats(io::IO=stdout)
+    	println(io, "Available memory: ", Base.format_bytes(available_memory()))
+    end
 end
-
 end
 
 # This is an internal function, not to be used by end users.  The keyword
