@@ -1038,6 +1038,10 @@ function _runtests(mod::Module, args::ParsedArgs;
                    )
 
     # determine parallelism
+    print_memory_stats()
+    GC.gc()
+    print_memory_stats()
+
     jobs = something(args.jobs, default_njobs())
     jobs = clamp(jobs, 1, length(tests))
     println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
