@@ -5,6 +5,8 @@ cd(@__DIR__)
 
 include(joinpath(@__DIR__, "utils.jl"))
 
+ParallelTestRunner.print_memory_stats()
+
 @testset "ParallelTestRunner" verbose=true begin
 
 @testset "basic use" begin
