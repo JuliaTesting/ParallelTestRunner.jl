@@ -498,23 +498,23 @@ end
 
 # Assumed memory footprint of a single test worker, used to clamp the default
 # number of jobs on memory-constrained machines (e.g. many cores but little
-# total memory). Packages whose tests are heavier can pass a larger
+# memory). Packages whose tests are heavier can pass a larger
 # `memory_per_worker` to `runtests`.
 const DEFAULT_MEMORY_PER_WORKER = Int64(2)^30
 
 # This is an internal function, not to be used by end users.  The
-# `cpu_threads` and `total_memory` keyword arguments are only for testing
+# `cpu_threads` and `free_memory` keyword arguments are only for testing
 # purposes.
 """
     default_njobs(; memory_per_worker = 2^30)
 
 Determine default number of parallel jobs: the number of CPU threads, clamped
 such that each worker can be assumed to use `memory_per_worker` bytes of the
-total system memory.
+available system memory.
 """
-function default_njobs(; cpu_threads = Sys.CPU_THREADS, total_memory = Sys.total_memory(),
+function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_memory(),
                          memory_per_worker = DEFAULT_MEMORY_PER_WORKER)
-    memory_jobs = Int64(total_memory) ÷ Int64(memory_per_worker)
+    memory_jobs = round(Int, Int64(free_memory) / memory_per_worker)
     return max(1, min(cpu_threads, memory_jobs))
 end
 
@@ -866,7 +866,7 @@ Several keyword arguments are also supported:
 - `--list`: List all available test files and exit
 - `--verbose`: Print more detailed information during test execution
 - `--quickfail`: Stop the entire test run as soon as any test fails
-- `--jobs=N`: Use N worker processes (default: based on CPU threads and total memory;
+- `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory;
   can also be set with the `PARALLELTESTRUNNER_NUM_JOBS` environment variable, with
   `--jobs=N` taking precedence)
 - `TESTS...`: Filter test files by name, matched using `startswith`
