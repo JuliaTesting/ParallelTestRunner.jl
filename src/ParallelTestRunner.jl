@@ -496,17 +496,26 @@ available_memory() = Sys.free_memory()
 
 end
 
-# This is an internal function, not to be used by end users.  The keyword
-# arguments are only for testing purposes.
-"""
-    default_njobs()
+# Assumed memory footprint of a single test worker, used to clamp the default
+# number of jobs on memory-constrained machines (e.g. many cores but little
+# memory). Packages whose tests are heavier can pass a larger
+# `memory_per_worker` to `runtests`.
+const DEFAULT_MEMORY_PER_WORKER = Int64(2)^30
 
-Determine default number of parallel jobs.
+# This is an internal function, not to be used by end users.  The
+# `cpu_threads` and `free_memory` keyword arguments are only for testing
+# purposes.
 """
-function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_memory())
-    jobs = cpu_threads
-    memory_jobs = Int64(free_memory) ÷ (2 * Int64(2)^30)
-    return max(1, min(jobs, memory_jobs))
+    default_njobs(; memory_per_worker = 2^30)
+
+Determine default number of parallel jobs: the number of CPU threads, clamped
+such that each worker can be assumed to use `memory_per_worker` bytes of the
+available system memory.
+"""
+function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_memory(),
+                         memory_per_worker = DEFAULT_MEMORY_PER_WORKER)
+    memory_jobs = round(Int, Int64(free_memory) / memory_per_worker)
+    return max(1, min(cpu_threads, memory_jobs))
 end
 
 # Historical test duration database
@@ -723,7 +732,9 @@ function parse_args(args; custom::Array{String} = String[])
                --list             List all available tests.
                --verbose          Print more information during testing.
                --quickfail        Fail the entire run as soon as a single test errored.
-               --jobs=N           Launch `N` processes to perform tests."""
+               --jobs=N           Launch `N` processes to perform tests. Can also be set
+                                  with the PARALLELTESTRUNNER_NUM_JOBS environment
+                                  variable, with `--jobs=N` taking precedence."""
 
         if !isempty(custom)
             usage *= "\n\nCustom arguments:"
@@ -799,7 +810,8 @@ end
              env = Vector{Pair{String, String}}(),
              stdout = Base.stdout,
              stderr = Base.stderr,
-             max_worker_rss = get_max_worker_rss())
+             max_worker_rss = get_max_worker_rss(),
+             memory_per_worker = 2^30)
     runtests(mod::Module, ARGS; ...)
 
 Run Julia tests in parallel across multiple worker processes.
@@ -842,6 +854,11 @@ Several keyword arguments are also supported:
   `test_worker` hook are the caller's responsibility.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
+- `memory_per_worker`: Assumed memory footprint (in bytes) of a single worker, used to
+  clamp the default number of jobs on memory-constrained machines (default: 1 GiB).
+  Packages whose tests use a lot of memory can pass a larger value to reduce the default
+  parallelism. Ignored when the number of jobs is set explicitly via `--jobs=N` or the
+  `PARALLELTESTRUNNER_NUM_JOBS` environment variable.
 
 ## Command Line Options
 
@@ -849,7 +866,9 @@ Several keyword arguments are also supported:
 - `--list`: List all available test files and exit
 - `--verbose`: Print more detailed information during test execution
 - `--quickfail`: Stop the entire test run as soon as any test fails
-- `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory)
+- `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory;
+  can also be set with the `PARALLELTESTRUNNER_NUM_JOBS` environment variable, with
+  `--jobs=N` taking precedence)
 - `TESTS...`: Filter test files by name, matched using `startswith`
 
 ## Behavior
@@ -922,7 +941,8 @@ function runtests(mod::Module, args::ParsedArgs;
                   exename = nothing,
                   exeflags = nothing,
                   env = Vector{Pair{String, String}}(),
-                  stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss())
+                  stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss(),
+                  memory_per_worker = DEFAULT_MEMORY_PER_WORKER)
 
     #
     # set-up
@@ -962,6 +982,7 @@ function runtests(mod::Module, args::ParsedArgs;
         stdout,
         stderr,
         max_worker_rss,
+        memory_per_worker,
     )
 end
 
@@ -981,12 +1002,14 @@ function _runtests(mod::Module, args::ParsedArgs;
                    stdout = Base.stdout,
                    stderr = Base.stderr,
                    max_worker_rss = get_max_worker_rss(),
+                   memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
                    )
 
     # determine parallelism
-    jobs = something(args.jobs, default_njobs())
+    env_jobs = tryparse(Int, get(ENV, "PARALLELTESTRUNNER_NUM_JOBS", ""))
+    jobs = @something args.jobs env_jobs default_njobs(; memory_per_worker)
     jobs = clamp(jobs, 1, length(tests))
-    println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
+    println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. To change the number of jobs, specify the `--jobs=N` argument to the tests, or set the `PARALLELTESTRUNNER_NUM_JOBS` environment variable.")
     !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
     sem = Base.Semaphore(max(1, jobs))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
