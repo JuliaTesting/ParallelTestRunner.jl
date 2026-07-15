@@ -86,6 +86,36 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "test start order" begin
+    # Tests must start in the given order, regardless of the
+    # number of threads of the host Julia process (issue #139).
+    testsuite = Dict(
+        "sort$(n)" => :(@test true)
+        for n in 1:5
+    )
+    tests = ["sort$(n)" for n in 1:length(testsuite)]
+
+    io = IOBuffer()
+    # with a single job, tests start strictly in acquisition order
+    ParallelTestRunner._runtests(
+        ParallelTestRunner, parse_args(["--jobs=1", "--verbose"]);
+        testsuite,
+        tests,
+        historical_durations=Dict{String, Float64}(),
+        stdout=io,
+        stderr=io,
+    )
+
+    str = String(take!(io))
+    @test contains(str, "SUCCESS")
+    started_at = map(tests) do name
+        m = match(Regex("$(name) .+ started at"), str)
+        @test m !== nothing
+        m === nothing ? typemax(Int) : m.offset
+    end
+    @test issorted(started_at)
+end
+
 @testset "init code" begin
     init_code = quote
         using Test
@@ -806,6 +836,41 @@ end
     @test !contains(str, "started at")
     @test !contains(str, "Available memory:")
     @test contains(str, "SUCCESS")
+end
+
+@testset "quickfail" begin
+    # To test that `--quickfail` does its job, we want to launch tests with one job, with
+    # the failing one launched as first: we should observe that the successful ones are
+    # never started.
+    testsuite = Dict(
+        "fail-test" => :( @test false ),
+        # If there's a bug in the launch order, having multiple successful tests increases
+        # the likelihood of hitting the bug, making investigation easier.
+        "pass-test1" => :( @test true ),
+        "pass-test2" => :( @test true ),
+        "pass-test3" => :( @test true ),
+        "pass-test4" => :( @test true ),
+        "pass-test5" => :( @test true ),
+    )
+    io = IOBuffer()
+    @test_throws Test.FallbackTestSetException begin
+        # Call `_runtests` so that we can enforce a run order.
+        ParallelTestRunner._runtests(
+            # Use a single job to make sure only `fail-test` is started.
+            ParallelTestRunner, parse_args(["--quickfail", "--verbose", "--jobs=1"]);
+            testsuite,
+            tests=["fail-test", "pass-test1", "pass-test2", "pass-test3", "pass-test4", "pass-test5"],
+            historical_durations=Dict{String, Float64}(),
+            stdout=io,
+            stderr=io,
+        )
+    end
+    str = String(take!(io))
+    @test contains(str, r"fail-test .+ started at")
+    @test contains(str, r"fail-test .+ failed at")
+    @test contains(str, "FAILURE")
+    # `fail-test` is always launched first, `pass-test`s are never started.
+    @test !contains(str, r"pass-test[1-5] .+ started at")
 end
 
 @testset "positional filter end-to-end" begin

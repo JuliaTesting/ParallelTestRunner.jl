@@ -41,7 +41,7 @@ else
     Base.unlock(l::Lockable) = Base.unlock(l.lock)
 end
 
-const ID_COUNTER = Threads.Atomic{Int}(0)
+const ID_COUNTER = Threads.Atomic{Int}(1)
 
 # Thin wrapper around Malt.Worker, to handle the stdio loop differently.
 struct PTRWorker <: Malt.AbstractWorker
@@ -54,7 +54,7 @@ function PTRWorker(; exename=Base.julia_cmd()[1], exeflags=String[], env=String[
     io = Lockable(IOBuffer())
     wrkr = Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false)
     stdio_loop(wrkr, io)
-    id = ID_COUNTER[] += 1
+    id = Threads.atomic_add!(ID_COUNTER, 1)
     return PTRWorker(wrkr, io, id)
 end
 
@@ -989,6 +989,47 @@ function runtests(mod::Module, args::ParsedArgs;
     historical_durations = load_test_history(mod)
     sort!(tests, by = x -> -get(historical_durations, x, Inf))
 
+    return _runtests(
+        mod, args;
+        testsuite,
+        tests,
+        historical_durations,
+        init_code,
+        init_worker_code,
+        test_worker,
+        RecordType,
+        custom_args,
+        exename,
+        exeflags,
+        env,
+        serial,
+        serial_position,
+        stdout,
+        stderr,
+        max_worker_rss,
+    )
+end
+
+# Helper function, to be used for testing, with `tests` already sorted.
+function _runtests(mod::Module, args::ParsedArgs;
+                   testsuite::Dict{String,Expr} = find_tests(pwd()),
+                   tests::Vector{String},
+                   historical_durations::Dict{String, Float64},
+                   init_code = :(),
+                   init_worker_code = :(),
+                   test_worker = Returns(nothing),
+                   RecordType::Type{<:AbstractTestRecord} = TestRecord,
+                   custom_args = (;),
+                   exename = nothing,
+                   exeflags = nothing,
+                   env = Vector{Pair{String, String}}(),
+                   serial::Vector{String} = String[],
+                   serial_position::Symbol = :before,
+                   stdout = Base.stdout,
+                   stderr = Base.stderr,
+                   max_worker_rss = get_max_worker_rss(),
+                   )
+
     # partition into serial and parallel groups
     serial_tests, parallel_tests = partition_tests(tests, serial)
 
@@ -1032,7 +1073,6 @@ function runtests(mod::Module, args::ParsedArgs;
             end
         end
     end
-
 
     #
     # output
@@ -1241,7 +1281,8 @@ function runtests(mod::Module, args::ParsedArgs;
             if !isnothing(shared_worker)
                 shared_worker[] = take!(worker_pool)
             end
-            @sync for test in phase_tests
+            next_test = Threads.Atomic{Int}(1)
+            @sync for _ in eachindex(phase_tests)
                 push!(worker_tasks, Threads.@spawn begin
                           local p = nothing
                           acquired = false
@@ -1252,6 +1293,11 @@ function runtests(mod::Module, args::ParsedArgs;
                               Threads.atomic_sub!(tests_to_start, 1)
 
                               done && return
+
+                              # with multiple threads, tasks reach this point in arbitrary order,
+                              # so pick the next test to run only now, rather than at spawn time,
+                              # to preserve the sorted test order (issue #139)
+                              test = phase_tests[Threads.atomic_add!(next_test, 1)]
 
                               test_t0 = @lock running_tests begin
                                   test_t0 = time()
@@ -1532,6 +1578,7 @@ function runtests(mod::Module, args::ParsedArgs;
 
     return
 end
+
 runtests(mod::Module, ARGS::Array{String}; kwargs...) = runtests(mod, parse_args(ARGS); kwargs...)
 
 end
