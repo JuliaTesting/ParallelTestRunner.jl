@@ -41,7 +41,7 @@ else
     Base.unlock(l::Lockable) = Base.unlock(l.lock)
 end
 
-const ID_COUNTER = Threads.Atomic{Int}(0)
+const ID_COUNTER = Threads.Atomic{Int}(1)
 
 # Thin wrapper around Malt.Worker, to handle the stdio loop differently.
 struct PTRWorker <: Malt.AbstractWorker
@@ -54,7 +54,7 @@ function PTRWorker(; exename=Base.julia_cmd()[1], exeflags=String[], env=String[
     io = Lockable(IOBuffer())
     wrkr = Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false)
     stdio_loop(wrkr, io)
-    id = ID_COUNTER[] += 1
+    id = Threads.atomic_add!(ID_COUNTER, 1)
     return PTRWorker(wrkr, io, id)
 end
 
