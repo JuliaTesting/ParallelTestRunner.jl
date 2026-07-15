@@ -54,7 +54,8 @@ function PTRWorker(; exename=Base.julia_cmd()[1], exeflags=String[], env=String[
     io = Lockable(IOBuffer())
     wrkr = Malt.Worker(; exename, exeflags, env, monitor_stdout=false, monitor_stderr=false)
     stdio_loop(wrkr, io)
-    id = ID_COUNTER[] += 1
+    Threads.atomic_add!(ID_COUNTER, 1)
+    id = ID_COUNTER[]
     return PTRWorker(wrkr, io, id)
 end
 
