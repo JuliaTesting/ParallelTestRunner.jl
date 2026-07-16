@@ -847,7 +847,6 @@ Several keyword arguments are also supported:
   `test_worker` hook are the caller's responsibility.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
-- `update_status_interval`: Interval (in seconds) between status updates during test execution.
 
 ## Command Line Options
 
@@ -928,9 +927,7 @@ function runtests(mod::Module, args::ParsedArgs;
                   exename = nothing,
                   exeflags = nothing,
                   env = Vector{Pair{String, String}}(),
-                  stdout = Base.stdout, stderr = Base.stderr,
-                  max_worker_rss = get_max_worker_rss(),
-                  update_status_interval = 1,)
+                  stdout = Base.stdout, stderr = Base.stderr, max_worker_rss = get_max_worker_rss())
 
     #
     # set-up
@@ -970,7 +967,6 @@ function runtests(mod::Module, args::ParsedArgs;
         stdout,
         stderr,
         max_worker_rss,
-        update_status_interval,
     )
 end
 
@@ -990,7 +986,6 @@ function _runtests(mod::Module, args::ParsedArgs;
                    stdout = Base.stdout,
                    stderr = Base.stderr,
                    max_worker_rss = get_max_worker_rss(),
-                   update_status_interval = 1,
                    )
 
     # determine parallelism
@@ -1173,7 +1168,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                 end
 
                 # After a while, display a status line
-                if !done && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= update_status_interval))
+                if !done && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 1))
                     update_status()
                     last_status_update[] = time()
                 end
