@@ -959,6 +959,17 @@ runtests(MyPackage, ARGS; serial=["big_alloc_test", "huge_matrix"])
 
 Workers are automatically recycled when they exceed memory limits to prevent out-of-memory
 issues during long test runs. The memory limit is set based on system architecture.
+
+## Failure Handling
+
+With `recycle_on_failure = true`, a worker is recycled after any test that did not pass, so
+a test that corrupts process-wide state (e.g. wedges a GPU driver) cannot poison subsequent
+tests on the same worker.
+
+With `retries = N` (default 0), tests that did not pass are re-run up to `N` times after
+the main run completes — sequentially, on a single fresh worker, with all other workers
+stopped — so tests that failed due to resource pressure from concurrent workers get an
+otherwise-idle system. Only the final attempt of each test is reported.
 """
 function runtests(mod::Module, args::ParsedArgs;
                   testsuite::Dict{String,Expr} = find_tests(pwd()),
@@ -973,6 +984,8 @@ function runtests(mod::Module, args::ParsedArgs;
                   stdout = Base.stdout,
                   stderr = Base.stderr,
                   max_worker_rss = get_max_worker_rss(),
+                  recycle_on_failure::Bool = false,
+                  retries::Integer = 0,
                   )
     #
     # set-up
@@ -1023,6 +1036,8 @@ function runtests(mod::Module, args::ParsedArgs;
         stdout,
         stderr,
         max_worker_rss,
+        recycle_on_failure,
+        retries,
     )
 end
 
@@ -1045,6 +1060,8 @@ function _runtests(mod::Module, args::ParsedArgs;
                    stdout = Base.stdout,
                    stderr = Base.stderr,
                    max_worker_rss = get_max_worker_rss(),
+                   recycle_on_failure::Bool = false,
+                   retries::Integer = 0,
                    )
 
     # partition into serial and parallel groups
@@ -1274,6 +1291,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     #
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
+    interrupted = false
     # After parallel-before-serial: stop extra workers so only one process is alive for
     # serial tests, but keep one parallel worker so we do not add a third addworker (ID_COUNTER).
     function drain_pool_leaving_one_worker!(pool, njobs)
@@ -1374,6 +1392,11 @@ function _runtests(mod::Module, args::ParsedArgs;
                                       # the worker has reached the max-rss limit, recycle it
                                       # so future tests start with a smaller working set
                                       Malt.stop(wrkr)
+                                  elseif recycle_on_failure && anynonpass(result[])
+                                      # a failing test may have left the worker in a bad state
+                                      # (e.g. a wedged GPU driver whose every later allocation
+                                      # fails); recycle it so future tests get a fresh process
+                                      Malt.stop(wrkr)
                                   end
                               else
                                   # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
@@ -1430,6 +1453,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             end
         end
     catch err
+        interrupted = true
         if !(err isa InterruptException)
             println(io_ctx.stderr, "\nCaught an error, stopping...")
         end
@@ -1464,6 +1488,55 @@ function _runtests(mod::Module, args::ParsedArgs;
     for p in worker_pool
         if p !== nothing && Malt.isrunning(p)
             Malt.stop(p)
+        end
+    end
+
+    # retry failed tests, if requested: sequentially, on a single fresh worker, with every
+    # other worker gone — tests that failed due to resource pressure (e.g. GPU memory
+    # oversubscription from concurrent workers) reliably pass on an otherwise-idle system.
+    # only the retried result is reported; persistent failures fail again and are reported
+    # exactly once.
+    if retries > 0 && !interrupted && args.quickfail === nothing
+        local retry_wrkr = nothing
+        for round in 1:retries
+            retryable = [r.test for r in results.value
+                         if r.result isa Exception || anynonpass(r.result[])]
+            isempty(retryable) && break
+            println(io_ctx.stdout)
+            printstyled(io_ctx.stdout,
+                        "Retrying $(length(retryable)) failed test(s) on a fresh worker...\n";
+                        color = :yellow)
+            for test in retryable
+                if retry_wrkr === nothing || !Malt.isrunning(retry_wrkr)
+                    retry_wrkr = addworker(; init_worker_code, io_ctx.color, exename,
+                                           exeflags, env)
+                end
+                test_t0 = time()
+                result = try
+                    Malt.remote_eval_wait(Main, retry_wrkr.w, :(import ParallelTestRunner))
+                    Malt.remote_call_fetch(invokelatest, retry_wrkr.w, runtest,
+                                           RecordType, testsuite[test], test,
+                                           init_code, test_t0, custom_args)
+                catch ex
+                    isa(ex, InterruptException) && rethrow()
+                    ex
+                end
+                test_t1 = time()
+                output = @lock retry_wrkr.io String(take!(retry_wrkr.io[]))
+                filter!(r -> r.test != test, results.value)
+                push!(results.value, (; test, result, output, test_t0, test_t1))
+                if result isa AbstractTestRecord && !anynonpass(result[])
+                    printstyled(io_ctx.stdout, "  $test passed on retry\n"; color = :green)
+                else
+                    printstyled(io_ctx.stdout, "  $test failed again\n"; color = :red)
+                    # don't let a failure contaminate the next retry
+                    Malt.stop(retry_wrkr)
+                    retry_wrkr = nothing
+                end
+            end
+        end
+        if retry_wrkr !== nothing && Malt.isrunning(retry_wrkr)
+            Malt.stop(retry_wrkr)
         end
     end
 
