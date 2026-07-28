@@ -1044,7 +1044,13 @@ function _runtests(mod::Module, args::ParsedArgs;
     if !isempty(serial_tests)
         println(stdout, "  $(length(serial_tests)) serial test(s) will run $(serial_position) the parallel batch.")
     end
-    !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
+    if !isnothing(args.verbose)
+        print(stdout, "Available memory: ")
+        printstyled(stdout, Base.format_bytes(available_memory()); bold=true)
+        print(stdout, "; Max worker RSS: ")
+        printstyled(stdout, Base.format_bytes(max_worker_rss); bold=true)
+        println(stdout)
+    end
 
     t0 = time()
     results = Lockable([])
