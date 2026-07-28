@@ -987,7 +987,13 @@ function _runtests(mod::Module, args::ParsedArgs;
     jobs = something(args.jobs, default_njobs())
     jobs = clamp(jobs, 1, length(tests))
     println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
-    !isnothing(args.verbose) && println(stdout, "Available memory: $(Base.format_bytes(available_memory()))")
+    if !isnothing(args.verbose)
+        print(stdout, "Available memory: ")
+        printstyled(stdout, Base.format_bytes(available_memory()); bold=true)
+        print(stdout, "; Max worker RSS: ")
+        printstyled(stdout, Base.format_bytes(max_worker_rss); bold=true)
+        println(stdout)
+    end
     sem = Base.Semaphore(max(1, jobs))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs

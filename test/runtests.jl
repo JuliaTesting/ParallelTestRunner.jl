@@ -28,6 +28,7 @@ include(joinpath(@__DIR__, "utils.jl"))
     @test contains(str, "time (s)")
 
     @test contains(str, "Available memory:")
+    @test contains(str, "Max worker RSS:")
     @test contains(str, "Init")
 
      # compile time as part of the struct not available before 1.11
@@ -829,6 +830,7 @@ end
     str = String(take!(io))
     @test !contains(str, "started at")
     @test !contains(str, "Available memory:")
+    @test !contains(str, "Max worker RSS:")
     @test contains(str, "SUCCESS")
 end
 
