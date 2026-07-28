@@ -1523,7 +1523,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                     # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
                     @assert result isa Exception
                     testset = create_testset(testname; start, stop)
-                    Test.record(testset, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = result, backtrace = [])]), LineNumberNode(1)))
+                    Test.record(testset, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = result, backtrace = Union{Ptr{Nothing}, Base.InterpreterIP}[])]), LineNumberNode(1)))
                 end
 
                 with_testset(testset) do
@@ -1535,7 +1535,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             for test in tests
                 (test in completed_tests) && continue
                 testset = create_testset(test)
-                Test.record(testset, Test.Error(:test_interrupted, test, nothing, Base.ExceptionStack(NamedTuple[(;exception = "skipped", backtrace = [])]), LineNumberNode(1)))
+                Test.record(testset, Test.Error(:test_interrupted, test, nothing, Base.ExceptionStack(NamedTuple[(;exception = "skipped", backtrace = Union{Ptr{Nothing}, Base.InterpreterIP}[])]), LineNumberNode(1)))
                 with_testset(testset) do
                     Test.record(o_ts, testset)
                 end
