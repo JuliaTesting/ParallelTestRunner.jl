@@ -114,7 +114,7 @@ The test runner provides real-time output showing:
 - Execution time
 - GC time and percentage
 - Memory allocation
-- RSS (Resident Set Size) memory usage
+- RSS (Resident Set Size) memory usage, shown in red once it exceeds the RSS threshold and the worker will be restarted
 
 ### Graceful Interruption
 
