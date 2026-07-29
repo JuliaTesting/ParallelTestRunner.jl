@@ -166,9 +166,10 @@ struct TestIOContext
     percent_align::Int
     alloc_align::Int
     rss_align::Int
+    max_worker_rss::Int
 end
 
-function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, verbose::Bool)
+function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, verbose::Bool, max_worker_rss::Int)
     elapsed_align = textwidth("time (s)")
     compile_align = textwidth("Compile")
     gc_align = textwidth("GC (s)")
@@ -180,7 +181,7 @@ function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lo
 
     return TestIOContext(
         stdout, stderr, color, verbose, lock, name_align, elapsed_align, compile_align, gc_align, percent_align,
-        alloc_align, rss_align
+        alloc_align, rss_align, max_worker_rss
     )
 end
 
@@ -250,8 +251,12 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
         alloc_str = @sprintf("%5.2f", base.bytes / 2^20)
         printstyled(ctx.stdout, lpad(alloc_str, ctx.alloc_align, " "), " │ ", color = :white)
 
-        rss_str = @sprintf("%5.2f", memory_usage(record) / 2^20)
-        printstyled(ctx.stdout, lpad(rss_str, ctx.rss_align, " "), " │\n", color = :white)
+        mem_use = memory_usage(record)
+        mem_color = mem_use > ctx.max_worker_rss ? :red : :white
+        rss_str = @sprintf("%5.2f", mem_use / 2^20)
+        printstyled(ctx.stdout, lpad(rss_str, ctx.rss_align, " "), color = mem_color)
+
+        printstyled(ctx.stdout, " │\n", color = :white)
 
         flush(ctx.stdout)
     finally
@@ -1099,7 +1104,7 @@ function _runtests(mod::Module, args::ParsedArgs;
         stderr.lock = print_lock
     end
 
-    io_ctx = test_IOContext(RecordType, stdout, stderr, print_lock, name_align, !isnothing(args.verbose))
+    io_ctx = test_IOContext(RecordType, stdout, stderr, print_lock, name_align, !isnothing(args.verbose), max_worker_rss)
     print_header(RecordType, io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
