@@ -1163,6 +1163,114 @@ end
         # We'll use jobs + 1 workers because one will crash.
         @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + jobs + 1
     end
+
+    @testset "quickfail in serial phase before parallel" begin
+        # The failing serial test runs first: the remaining serial tests and the whole
+        # parallel batch should never be started.
+        testsuite = Dict(
+            "fail-serial" => :( @test false ),
+            "pass-serial1" => :( @test true ),
+            "pass-serial2" => :( @test true ),
+            "pass-parallel1" => :( @test true ),
+            "pass-parallel2" => :( @test true ),
+            "pass-parallel3" => :( @test true ),
+        )
+        io = IOBuffer()
+        @test_throws Test.FallbackTestSetException begin
+            # Call `_runtests` so that we can enforce a run order.
+            ParallelTestRunner._runtests(
+                ParallelTestRunner, parse_args(["--quickfail", "--verbose", "--jobs=2"]);
+                testsuite,
+                tests=["fail-serial", "pass-serial1", "pass-serial2",
+                       "pass-parallel1", "pass-parallel2", "pass-parallel3"],
+                historical_durations=Dict{String, Float64}(),
+                serial=["fail-serial", "pass-serial1", "pass-serial2"],
+                stdout=io,
+                stderr=io,
+            )
+        end
+        str = String(take!(io))
+        @test contains(str, "3 serial test(s) will run before")
+        @test contains(str, r"fail-serial .+ started at")
+        @test contains(str, r"fail-serial .+ failed at")
+        @test contains(str, "FAILURE")
+        # `fail-serial` is always launched first, the other tests are never started.
+        @test !contains(str, r"pass-serial[12] .+ started at")
+        @test !contains(str, r"pass-parallel[1-3] .+ started at")
+    end
+
+    @testset "quickfail in parallel phase with serial tests after" begin
+        # The failing parallel test runs first: the remaining parallel tests and the
+        # whole serial batch should never be started.
+        testsuite = Dict(
+            "fail-parallel" => :( @test false ),
+            "pass-parallel1" => :( @test true ),
+            "pass-parallel2" => :( @test true ),
+            "pass-serial1" => :( @test true ),
+            "pass-serial2" => :( @test true ),
+        )
+        io = IOBuffer()
+        @test_throws Test.FallbackTestSetException begin
+            # Call `_runtests` so that we can enforce a run order.
+            ParallelTestRunner._runtests(
+                # Use a single job to make sure only `fail-parallel` is started.
+                ParallelTestRunner, parse_args(["--quickfail", "--verbose", "--jobs=1"]);
+                testsuite,
+                tests=["fail-parallel", "pass-parallel1", "pass-parallel2",
+                       "pass-serial1", "pass-serial2"],
+                historical_durations=Dict{String, Float64}(),
+                serial=["pass-serial1", "pass-serial2"],
+                serial_position=:after,
+                stdout=io,
+                stderr=io,
+            )
+        end
+        str = String(take!(io))
+        @test contains(str, "2 serial test(s) will run after")
+        @test contains(str, r"fail-parallel .+ started at")
+        @test contains(str, r"fail-parallel .+ failed at")
+        @test contains(str, "FAILURE")
+        # `fail-parallel` is always launched first, the other tests are never started.
+        @test !contains(str, r"pass-parallel[12] .+ started at")
+        @test !contains(str, r"pass-serial[12] .+ started at")
+    end
+
+    @testset "quickfail in serial phase after parallel" begin
+        # All parallel tests pass, then the failing serial test runs first in the serial
+        # phase: the remaining serial tests should never be started.
+        testsuite = Dict(
+            "pass-parallel1" => :( @test true ),
+            "pass-parallel2" => :( @test true ),
+            "fail-serial" => :( @test false ),
+            "pass-serial1" => :( @test true ),
+            "pass-serial2" => :( @test true ),
+        )
+        io = IOBuffer()
+        @test_throws Test.FallbackTestSetException begin
+            # Call `_runtests` so that we can enforce a run order.
+            ParallelTestRunner._runtests(
+                ParallelTestRunner, parse_args(["--quickfail", "--verbose", "--jobs=2"]);
+                testsuite,
+                tests=["pass-parallel1", "pass-parallel2",
+                       "fail-serial", "pass-serial1", "pass-serial2"],
+                historical_durations=Dict{String, Float64}(),
+                serial=["fail-serial", "pass-serial1", "pass-serial2"],
+                serial_position=:after,
+                stdout=io,
+                stderr=io,
+            )
+        end
+        str = String(take!(io))
+        @test contains(str, "3 serial test(s) will run after")
+        # The parallel batch runs to completion before the serial phase starts.
+        @test contains(str, r"pass-parallel1 .+ started at")
+        @test contains(str, r"pass-parallel2 .+ started at")
+        @test contains(str, r"fail-serial .+ started at")
+        @test contains(str, r"fail-serial .+ failed at")
+        @test contains(str, "FAILURE")
+        # The serial tests after `fail-serial` are never started.
+        @test !contains(str, r"pass-serial[12] .+ started at")
+    end
 end
 
 # This testset should always be the last one, don't add anything after this.
