@@ -1168,7 +1168,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                 end
 
                 # After a while, display a status line
-                if !done && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 1))
+                if !done && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 20))
                     update_status()
                     last_status_update[] = time()
                 end
