@@ -252,7 +252,7 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
         printstyled(ctx.stdout, lpad(alloc_str, ctx.alloc_align, " "), " │ ", color = :white)
 
         mem_use = memory_usage(record)
-        mem_color = mem_use > ctx.max_worker_rss ? :red : :white
+        mem_color = mem_use > ctx.max_worker_rss ? :yellow : :white
         rss_str = @sprintf("%5.2f", mem_use / 2^20)
         printstyled(ctx.stdout, lpad(rss_str, ctx.rss_align, " "), color = mem_color)
 
@@ -1230,7 +1230,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                 end
 
                 # After a while, display a status line
-                if !done && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 1))
+                if !done && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 20))
                     update_status()
                     last_status_update[] = time()
                 end
