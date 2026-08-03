@@ -514,7 +514,7 @@ function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_
     return max(1, min(jobs, memory_jobs))
 end
 
-# Struct to make sorting test history entries easier
+# Struct used in runtests to sort failed tests before successful ones
 struct TestHistoryEntry <: AbstractFloat
     duration::Float64
     failed::Bool
@@ -522,6 +522,7 @@ end
 # successful tests are sorted before failed ones, so they always run first
 Base.isless(a::TestHistoryEntry, b::TestHistoryEntry) = a.failed == b.failed ? a.duration < b.duration : a.failed < b.failed
 
+# Historical test duration database
 function get_history_files(mod::Module)
     scratch_dir = @get_scratch!("durations")
     path_base = joinpath(scratch_dir, "v$(VERSION.major).$(VERSION.minor)")
