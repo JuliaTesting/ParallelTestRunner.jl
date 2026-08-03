@@ -515,11 +515,12 @@ function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_
 end
 
 # Struct used in runtests to sort failed tests before successful ones
-struct TestHistoryEntry <: AbstractFloat
+struct TestHistoryEntry
     duration::Float64
     failed::Bool
 end
-# successful tests are sorted before failed ones, so they always run first
+# successful tests < failed tests, so when reversing the
+# sort they are also in proper descending order
 Base.isless(a::TestHistoryEntry, b::TestHistoryEntry) = a.failed == b.failed ? a.duration < b.duration : a.failed < b.failed
 
 # Historical test duration database
