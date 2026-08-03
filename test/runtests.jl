@@ -52,7 +52,7 @@ include(joinpath(@__DIR__, "utils.jl"))
         @test contains(str, "(%)")
     end
 
-    @test all(isfile.(ParallelTestRunner.get_history_files(ParallelTestRunner)))
+    @test all(isfile, ParallelTestRunner.get_history_files(ParallelTestRunner))
 end
 
 @testset "default njobs" begin
