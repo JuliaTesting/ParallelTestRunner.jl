@@ -529,25 +529,16 @@ function get_history_files(mod::Module)
 end
 function load_test_history(mod::Module)
     history_file, failed_history_file = get_history_files(mod)
-
-    hist = if isfile(history_file)
-        try
-            deserialize(history_file)::Dict{String, Float64}
-        catch e
-            @warn "Failed to load test history from $history_file" exception=e
-            Dict{String, Float64}()
-        end
-    else
+    hist = try
+        deserialize(history_file)::Dict{String, Float64}
+    catch e
+        @warn "Failed to load test history from $history_file" exception=e
         Dict{String, Float64}()
     end
-    failed_hist = if isfile(failed_history_file)
-        try
-            deserialize(failed_history_file)::Set{String}
-        catch e
-            @warn "Failed to load failed test history from $failed_history_file" exception=e
-            Set{String}()
-        end
-    else
+    failed_hist = try
+        deserialize(failed_history_file)::Set{String}
+    catch e
+        @warn "Failed to load failed test history from $failed_history_file" exception=e
         Set{String}()
     end
     return hist, failed_hist
@@ -1550,11 +1541,9 @@ function _runtests(mod::Module, args::ParsedArgs;
                 if result isa AbstractTestRecord
                     testset = result[]::DefaultTestSet
                     historical_durations[testname] = stop - start
-                    if anynonpass(testset)
-                        push!(historical_failures, testname)
-                    else
-                        delete!(historical_failures, testname)
-                    end
+                    # push to historical_failures on failure and delete on success
+                    push_or_delete! = anynonpass(testset) ? push! : delete!
+                    push_or_delete!(historical_failures, testname)
                 else
                     # If this test raised an exception that means the test runner itself had some problem,
                     # so we may have hit a segfault, deserialization errors or something similar.
