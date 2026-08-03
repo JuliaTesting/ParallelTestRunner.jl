@@ -523,40 +523,30 @@ end
 Base.isless(a::TestHistoryEntry, b::TestHistoryEntry) = a.failed == b.failed ? a.duration < b.duration : a.failed < b.failed
 
 # Historical test duration database
-function get_history_files(mod::Module)
+function get_history_file(mod::Module)
+    # History file version. Change when modifying the history format
+    hist_ver = "v2"
     scratch_dir = @get_scratch!("durations")
-    path_base = joinpath(scratch_dir, "v$(VERSION.major).$(VERSION.minor)")
-    return joinpath(path_base, "$(nameof(mod)).jls"), joinpath(path_base, "$(nameof(mod))_failed.jls")
+    return joinpath(scratch_dir, "v$(VERSION.major).$(VERSION.minor)", hist_ver, "$(nameof(mod)).jls")
 end
 function load_test_history(mod::Module)
-    history_file, failed_history_file = get_history_files(mod)
-    hist = try
-        deserialize(history_file)::Dict{String, Float64}
-    catch e
-        @warn "Failed to load test history from $history_file" exception=e
-        Dict{String, Float64}()
+    history_file = get_history_file(mod)
+    if isfile(history_file)
+        try
+            return deserialize(history_file)::Tuple{Dict{String, Float64}, Set{String}}
+        catch e
+            @warn "Failed to load test history from $history_file" exception=e
+        end
     end
-    failed_hist = try
-        deserialize(failed_history_file)::Set{String}
-    catch e
-        @warn "Failed to load failed test history from $failed_history_file" exception=e
-        Set{String}()
-    end
-    return hist, failed_hist
+    return (Dict{String, Float64}(), Set{String}())
 end
-function save_test_history(mod::Module, history::Dict{String, Float64}, failed_tests::Set{String})
-    history_file, failed_history_file = get_history_files(mod)
+function save_test_history(mod::Module, history::Tuple{Dict{String, Float64}, Set{String}})
+    history_file = get_history_file(mod)
     try
         mkpath(dirname(history_file))
         serialize(history_file, history)
     catch e
         @warn "Failed to save test history to $history_file" exception=e
-    end
-    try
-        mkpath(dirname(failed_history_file))
-        serialize(failed_history_file, failed_tests)
-    catch e
-        @warn "Failed to save test failures to $failed_history_file" exception=e
     end
 end
 
@@ -1585,7 +1575,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             Test.TESTSET_PRINT_ENABLE[] = old_print_setting
         end
     end
-    save_test_history(mod, historical_durations, historical_failures)
+    save_test_history(mod, (historical_durations, historical_failures))
 
     # display the results
     println(io_ctx.stdout)

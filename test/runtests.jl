@@ -52,7 +52,7 @@ include(joinpath(@__DIR__, "utils.jl"))
         @test contains(str, "(%)")
     end
 
-    @test all(isfile, ParallelTestRunner.get_history_files(ParallelTestRunner))
+    @test all(isfile, ParallelTestRunner.get_history_file(ParallelTestRunner))
 end
 
 @testset "default njobs" begin
@@ -1310,13 +1310,13 @@ end
             contains(k, "serial")
         end
 
-        ParallelTestRunner.save_test_history(mod, Dict(
+        ParallelTestRunner.save_test_history(mod, (Dict(
             "long-serial-pass" => 10.0,
             "short-serial-fail" => 1.0,
             "long-pass" => 10.0,
             "mid-pass" => 5.0,
             "short-fail" => 1.0,
-        ), Set(["short-serial-fail", "short-fail"]))
+        ), Set(["short-serial-fail", "short-fail"])))
 
         io = IOBuffer()
         runtests(
