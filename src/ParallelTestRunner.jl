@@ -1038,8 +1038,8 @@ end
 function _runtests(mod::Module, args::ParsedArgs;
                    testsuite::Dict{String,Expr} = find_tests(pwd()),
                    tests::Vector{String},
-                   historical_durations::Dict{String, Float64},
-                   historical_failures::Set{String},
+                   historical_durations::Dict{String, Float64} = Dict{String, Float64}(),
+                   historical_failures::Set{String} = Set{String}(),
                    init_code = :(),
                    init_worker_code = :(),
                    test_worker = Returns(nothing),
