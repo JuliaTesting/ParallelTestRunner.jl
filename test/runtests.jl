@@ -102,7 +102,6 @@ end
         ParallelTestRunner, parse_args(["--jobs=1", "--verbose"]);
         testsuite,
         tests,
-        historical_durations=Dict{String, Float64}(),
         stdout=io,
         stderr=io,
     )
@@ -827,6 +826,31 @@ end
     @test any(contains("--color=yes"), exe.exec)
 end
 
+@testset "TestHistoryEntry" begin
+    flow = ParallelTestRunner.TestHistoryEntry(1,true)
+    fhigh = ParallelTestRunner.TestHistoryEntry(10,true)
+
+    slow = ParallelTestRunner.TestHistoryEntry(1,false)
+    shigh = ParallelTestRunner.TestHistoryEntry(10,false)
+
+    # irreflexive: lt(x, x) always yields false
+    @test !isless(flow, flow)
+    @test !isless(slow, slow)
+    @test !isless(fhigh, fhigh)
+    @test !isless(shigh, shigh)
+
+    # asymmetric: if lt(x, y) yields true then lt(y, x) yields false
+    @test isless(flow, fhigh)
+    @test !isless(fhigh, flow)
+    @test isless(shigh, flow)
+    @test !isless(flow, shigh)
+
+    # transitive: lt(x, y) && lt(y, z) implies lt(x, z)
+    @test isless(slow, shigh)
+    @test isless(shigh, flow)
+    @test isless(slow, flow)
+end
+
 # ── Integration tests ────────────────────────────────────────────────────────
 
 @testset "non-verbose mode" begin
@@ -862,7 +886,6 @@ end
             ParallelTestRunner, parse_args(["--quickfail", "--verbose", "--jobs=1"]);
             testsuite,
             tests=["fail-test", "pass-test1", "pass-test2", "pass-test3", "pass-test4", "pass-test5"],
-            historical_durations=Dict{String, Float64}(),
             stdout=io,
             stderr=io,
         )
@@ -1183,7 +1206,6 @@ end
                 testsuite,
                 tests=["fail-serial", "pass-serial1", "pass-serial2",
                        "pass-parallel1", "pass-parallel2", "pass-parallel3"],
-                historical_durations=Dict{String, Float64}(),
                 serial=["fail-serial", "pass-serial1", "pass-serial2"],
                 stdout=io,
                 stderr=io,
@@ -1218,7 +1240,6 @@ end
                 testsuite,
                 tests=["fail-parallel", "pass-parallel1", "pass-parallel2",
                        "pass-serial1", "pass-serial2"],
-                historical_durations=Dict{String, Float64}(),
                 serial=["pass-serial1", "pass-serial2"],
                 serial_position=:after,
                 stdout=io,
@@ -1253,7 +1274,6 @@ end
                 testsuite,
                 tests=["pass-parallel1", "pass-parallel2",
                        "fail-serial", "pass-serial1", "pass-serial2"],
-                historical_durations=Dict{String, Float64}(),
                 serial=["fail-serial", "pass-serial1", "pass-serial2"],
                 serial_position=:after,
                 stdout=io,
@@ -1270,6 +1290,62 @@ end
         @test contains(str, "FAILURE")
         # The serial tests after `fail-serial` are never started.
         @test !contains(str, r"pass-serial[12] .+ started at")
+    end
+
+    @testset "run previously failed tests first" begin
+        # a previously-failed test must start before previously-passing tests,
+        # even if it has a much shorter historical duration than they do
+        mod = @eval(Main, module $(gensym(:failfirstserial)) end)
+
+        testsuite = Dict(
+            "long-serial-pass" => :(@test true),
+            "mid-omitted-serial-pass" => :(@test true),
+            "short-serial-fail" => :(@test true),
+            "long-pass" => :(@test true),
+            "mid-omitted-pass" => :(@test true),
+            "mid-pass" => :(@test true),
+            "short-fail" => :(@test true),
+        )
+        serial = filter(collect(keys(testsuite))) do k
+            contains(k, "serial")
+        end
+
+        ParallelTestRunner.save_test_history(mod, (Dict(
+            "long-serial-pass" => 10.0,
+            "short-serial-fail" => 1.0,
+            "long-pass" => 10.0,
+            "mid-pass" => 5.0,
+            "short-fail" => 1.0,
+        ), Set(["short-serial-fail", "short-fail"])))
+
+        io = IOBuffer()
+        runtests(
+            mod, parse_args(["--jobs=1", "--verbose"]);
+            testsuite,
+            stdout=io,
+            stderr=io,
+            serial
+        )
+
+        str = String(take!(io)); print(str)
+        @test contains(str, "SUCCESS")
+
+        # create a mapping of test names to the character offset of their start times (lower is earlier)
+        started_at = Dict(
+            name => (m = match(Regex("$(name) .+ started at"), str); @test m !== nothing; m === nothing ? typemax(Int) : m.offset)
+            for name in keys(testsuite)
+        )
+
+        # normal
+        @test started_at["short-fail"] < started_at["mid-pass"]
+        @test started_at["short-fail"] < started_at["long-pass"]
+        @test started_at["short-fail"] < started_at["mid-omitted-pass"]
+        # among the remaining (previously-passing) tests, longer ones still run first
+        @test started_at["long-pass"] < started_at["mid-pass"]
+
+        # serial
+        @test started_at["short-serial-fail"] < started_at["long-serial-pass"]
+        @test started_at["short-serial-fail"] < started_at["mid-omitted-serial-pass"]
     end
 end
 
