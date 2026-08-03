@@ -514,44 +514,57 @@ function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_
     return max(1, min(jobs, memory_jobs))
 end
 
-# Historical test duration database
+# Struct to make sorting test history entries easier
 struct TestHistoryEntry <: AbstractFloat
     duration::Float64
     failed::Bool
 end
 # successful tests are sorted before failed ones, so they always run first
 Base.isless(a::TestHistoryEntry, b::TestHistoryEntry) = a.failed == b.failed ? a.duration < b.duration : a.failed < b.failed
-Base.promote_rule(::Type{T}, ::Type{TestHistoryEntry}) where {T} = promote_type(T, Float64)
-Base.promote_rule(::Type{TestHistoryEntry}, ::Type{T}) where {T} = promote_type(Float64,T)
-# for compatibility with older versions of ParallelTestRunner
-Base.convert(::Type{TestHistoryEntry}, duration::Number) = TestHistoryEntry(duration, false)
-Base.convert(::Type{Float64}, entry::TestHistoryEntry) = entry.duration
 
-function get_history_file(mod::Module)
+function get_history_files(mod::Module)
     scratch_dir = @get_scratch!("durations")
-    return joinpath(scratch_dir, "v$(VERSION.major).$(VERSION.minor)", "$(nameof(mod)).jls")
+    path_base = joinpath(scratch_dir, "v$(VERSION.major).$(VERSION.minor)")
+    return joinpath(path_base, "$(nameof(mod)).jls"), joinpath(path_base, "$(nameof(mod))_failed.jls")
 end
 function load_test_history(mod::Module)
-    history_file = get_history_file(mod)
-    if isfile(history_file)
+    history_file, failed_history_file = get_history_files(mod)
+
+    hist = if isfile(history_file)
         try
-            hist::Dict{String, TestHistoryEntry} = deserialize(history_file)
-            return hist
+            deserialize(history_file)::Dict{String, Float64}
         catch e
             @warn "Failed to load test history from $history_file" exception=e
-            return Dict{String, TestHistoryEntry}()
+            Dict{String, Float64}()
         end
     else
-        return Dict{String, TestHistoryEntry}()
+        Dict{String, Float64}()
     end
+    failed_hist = if isfile(failed_history_file)
+        try
+            deserialize(failed_history_file)::Set{String}
+        catch e
+            @warn "Failed to load failed test history from $failed_history_file" exception=e
+            Set{String}()
+        end
+    else
+        Set{String}()
+    end
+    return hist, failed_hist
 end
-function save_test_history(mod::Module, history::Dict{String, TestHistoryEntry})
-    history_file = get_history_file(mod)
+function save_test_history(mod::Module, history::Dict{String, Float64}, failed_tests::Set{String})
+    history_file, failed_history_file = get_history_files(mod)
     try
         mkpath(dirname(history_file))
         serialize(history_file, history)
     catch e
         @warn "Failed to save test history to $history_file" exception=e
+    end
+    try
+        mkpath(dirname(failed_history_file))
+        serialize(failed_history_file, failed_tests)
+    catch e
+        @warn "Failed to save test failures to $failed_history_file" exception=e
     end
 end
 
@@ -1004,14 +1017,16 @@ function runtests(mod::Module, args::ParsedArgs;
     # determine test order
     tests = collect(keys(testsuite))
     Random.shuffle!(tests)
-    historical_durations = load_test_history(mod)
-    sort!(tests, by = x -> get(historical_durations, x, TestHistoryEntry(Inf, false)), rev = true)
+    historical_durations, historical_failures = load_test_history(mod)
+    get_historical_duration(test) = TestHistoryEntry(get(historical_durations, test, Inf), test in historical_failures)
+    sort!(tests, by = x -> get_historical_duration(x), rev = true)
 
     return _runtests(
         mod, args;
         testsuite,
         tests,
         historical_durations,
+        historical_failures,
         init_code,
         init_worker_code,
         test_worker,
@@ -1032,7 +1047,8 @@ end
 function _runtests(mod::Module, args::ParsedArgs;
                    testsuite::Dict{String,Expr} = find_tests(pwd()),
                    tests::Vector{String},
-                   historical_durations::Dict{String, TestHistoryEntry},
+                   historical_durations::Dict{String, Float64},
+                   historical_failures::Set{String},
                    init_code = :(),
                    init_worker_code = :(),
                    test_worker = Returns(nothing),
@@ -1170,7 +1186,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             ## currently-running
             for (test, start_time) in running_snapshot
                 elapsed = time() - start_time
-                duration::Float64 = get(historical_durations, test, est_per_test)
+                duration = get(historical_durations, test, est_per_test)
                 est_remaining += max(0.0, duration - elapsed)
             end
             ## yet-to-run
@@ -1533,7 +1549,12 @@ function _runtests(mod::Module, args::ParsedArgs;
 
                 if result isa AbstractTestRecord
                     testset = result[]::DefaultTestSet
-                    historical_durations[testname] = TestHistoryEntry(stop - start, anynonpass(testset))
+                    historical_durations[testname] = stop - start
+                    if anynonpass(testset)
+                        push!(historical_failures, testname)
+                    else
+                        delete!(historical_failures, testname)
+                    end
                 else
                     # If this test raised an exception that means the test runner itself had some problem,
                     # so we may have hit a segfault, deserialization errors or something similar.
@@ -1542,7 +1563,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                     @assert result isa Exception
                     testset = create_testset(testname; start, stop)
                     Test.record(testset, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = result, backtrace = Union{Ptr{Nothing}, Base.InterpreterIP}[])]), LineNumberNode(1)))
-                    historical_durations[testname] = TestHistoryEntry(Inf, true)
+                    push!(historical_failures, testname)
                 end
 
                 with_testset(testset) do
@@ -1574,7 +1595,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             Test.TESTSET_PRINT_ENABLE[] = old_print_setting
         end
     end
-    save_test_history(mod, historical_durations)
+    save_test_history(mod, historical_durations, historical_failures)
 
     # display the results
     println(io_ctx.stdout)

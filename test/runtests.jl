@@ -1,5 +1,4 @@
 using ParallelTestRunner
-using ParallelTestRunner: TestHistoryEntry
 using Test
 
 # Helper macro to show output of tests in case they fail.  Useful for debugging.
@@ -53,7 +52,7 @@ include(joinpath(@__DIR__, "utils.jl"))
         @test contains(str, "(%)")
     end
 
-    @test isfile(ParallelTestRunner.get_history_file(ParallelTestRunner))
+    @test all(isfile.(ParallelTestRunner.get_history_files(ParallelTestRunner)))
 end
 
 @testset "default njobs" begin
@@ -103,7 +102,8 @@ end
         ParallelTestRunner, parse_args(["--jobs=1", "--verbose"]);
         testsuite,
         tests,
-        historical_durations=Dict{String, TestHistoryEntry}(),
+        historical_durations=Dict{String, Float64}(),
+        historical_failures=Set{String}(),
         stdout=io,
         stderr=io,
     )
@@ -829,11 +829,11 @@ end
 end
 
 @testset "TestHistoryEntry" begin
-    flow = TestHistoryEntry(1,true)
-    fhigh = TestHistoryEntry(10,true)
+    flow = ParallelTestRunner.TestHistoryEntry(1,true)
+    fhigh = ParallelTestRunner.TestHistoryEntry(10,true)
 
-    slow = TestHistoryEntry(1,false)
-    shigh = TestHistoryEntry(10,false)
+    slow = ParallelTestRunner.TestHistoryEntry(1,false)
+    shigh = ParallelTestRunner.TestHistoryEntry(10,false)
 
     # irreflexive: lt(x, x) always yields false
     @test !isless(flow, flow)
@@ -851,12 +851,6 @@ end
     @test isless(slow, shigh)
     @test isless(shigh, flow)
     @test isless(slow, flow)
-
-    # addition/subtraction with Float64
-    @test TestHistoryEntry(1, true) + 1.0 == 2.0
-    @test TestHistoryEntry(3, false) - 1.0 == 2.0
-    @test TestHistoryEntry(1, false) + 1.0 == 2.0
-    @test TestHistoryEntry(3, true) - 1.0 == 2.0
 end
 
 # ── Integration tests ────────────────────────────────────────────────────────
@@ -894,7 +888,8 @@ end
             ParallelTestRunner, parse_args(["--quickfail", "--verbose", "--jobs=1"]);
             testsuite,
             tests=["fail-test", "pass-test1", "pass-test2", "pass-test3", "pass-test4", "pass-test5"],
-            historical_durations=Dict{String, TestHistoryEntry}(),
+            historical_durations=Dict{String, Float64}(),
+            historical_failures=Set{String}(),
             stdout=io,
             stderr=io,
         )
@@ -1215,7 +1210,8 @@ end
                 testsuite,
                 tests=["fail-serial", "pass-serial1", "pass-serial2",
                        "pass-parallel1", "pass-parallel2", "pass-parallel3"],
-                historical_durations=Dict{String, TestHistoryEntry}(),
+                historical_durations=Dict{String, Float64}(),
+                historical_failures=Set{String}(),
                 serial=["fail-serial", "pass-serial1", "pass-serial2"],
                 stdout=io,
                 stderr=io,
@@ -1250,7 +1246,8 @@ end
                 testsuite,
                 tests=["fail-parallel", "pass-parallel1", "pass-parallel2",
                        "pass-serial1", "pass-serial2"],
-                historical_durations=Dict{String, TestHistoryEntry}(),
+                historical_durations=Dict{String, Float64}(),
+                historical_failures=Set{String}(),
                 serial=["pass-serial1", "pass-serial2"],
                 serial_position=:after,
                 stdout=io,
@@ -1285,7 +1282,8 @@ end
                 testsuite,
                 tests=["pass-parallel1", "pass-parallel2",
                        "fail-serial", "pass-serial1", "pass-serial2"],
-                historical_durations=Dict{String, TestHistoryEntry}(),
+                historical_durations=Dict{String, Float64}(),
+                historical_failures=Set{String}(),
                 serial=["fail-serial", "pass-serial1", "pass-serial2"],
                 serial_position=:after,
                 stdout=io,
@@ -1323,12 +1321,12 @@ end
         end
 
         ParallelTestRunner.save_test_history(mod, Dict(
-            "long-serial-pass" => TestHistoryEntry(10.0, false),
-            "short-serial-fail" => TestHistoryEntry(1.0, true),
-            "long-pass" => TestHistoryEntry(10.0, false),
-            "mid-pass" => TestHistoryEntry(5.0, false),
-            "short-fail" => TestHistoryEntry(1.0, true),
-        ))
+            "long-serial-pass" => 10.0,
+            "short-serial-fail" => 1.0,
+            "long-pass" => 10.0,
+            "mid-pass" => 5.0,
+            "short-fail" => 1.0,
+        ), Set(["short-serial-fail", "short-fail"]))
 
         io = IOBuffer()
         runtests(
