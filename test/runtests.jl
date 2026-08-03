@@ -1463,6 +1463,203 @@ end
     end
 end
 
+@testset "recycle_on_failure" begin
+    # Call `_runtests` throughout, so that we can enforce a run order, and use a single job,
+    # so that all tests share the same pool slot: a test only gets a new worker if the
+    # previous one was recycled.
+    testsuite = Dict(
+        "fail1" => :( @test false ),
+        "pass1" => :( @test true ),
+        "fail2" => :( @test false ),
+        "pass2" => :( @test true ),
+    )
+    tests = ["fail1", "pass1", "fail2", "pass2"]
+
+    @testset "workers are reused across failures by default" begin
+        io = IOBuffer()
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        @test_throws Test.FallbackTestSetException begin
+            ParallelTestRunner._runtests(
+                ParallelTestRunner, parse_args(["--jobs=1"]);
+                testsuite,
+                tests,
+                historical_durations=Dict{String, Float64}(),
+                stdout=io,
+                stderr=io,
+            )
+        end
+        str = String(take!(io))
+        @test contains(str, "FAILURE")
+        # A failing test does not recycle its worker, so a single one runs all four tests.
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 1
+    end
+
+    @testset "worker is recycled after a failed test" begin
+        io = IOBuffer()
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
+        @test_throws Test.FallbackTestSetException begin
+            ParallelTestRunner._runtests(
+                ParallelTestRunner, parse_args(["--jobs=1"]);
+                testsuite,
+                tests,
+                historical_durations=Dict{String, Float64}(),
+                stdout=io,
+                stderr=io,
+                recycle_on_failure=true,
+            )
+        end
+        str = String(take!(io))
+        @test contains(str, "FAILURE")
+        # `fail1` and `fail2` recycle their worker, so `pass1` and `pass2` each need a fresh
+        # one: 1 initial worker + 2 replacements.
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 3
+    end
+end
+
+@testset "retries" begin
+    # A test that fails on its first attempt and passes on any subsequent one, by recording
+    # attempts in a file: the worker running the retry is a different process, so the marker
+    # has to live outside of it.
+    flaky_test(marker, body=:( @test true )) = quote
+        if isfile($marker)
+            $body
+        else
+            touch($marker)
+            @test false
+        end
+    end
+
+    @testset "failed test passing on retry is reported as passing" begin
+        mktempdir() do dir
+            testsuite = Dict(
+                "flaky" => flaky_test(joinpath(dir, "flaky")),
+                "passes" => :( @test true ),
+            )
+            io = IOBuffer()
+            @show_if_error io ParallelTestRunner._runtests(
+                ParallelTestRunner, parse_args(["--jobs=1"]);
+                testsuite,
+                tests=["flaky", "passes"],
+                historical_durations=Dict{String, Float64}(),
+                stdout=io,
+                stderr=io,
+                retries=1,
+            )
+            str = String(take!(io))
+            # Only the failed test is retried, and its retried result is the one reported.
+            @test contains(str, "Retrying 1 failed test(s)")
+            @test contains(str, "flaky passed on retry")
+            @test !contains(str, "passes passed on retry")
+            @test contains(str, "SUCCESS")
+            # Two results in total: the failed attempt of `flaky` was replaced by the
+            # retried one, rather than reported next to it.
+            @test contains(str, r"Overall +\| +2 +2 ")
+        end
+    end
+
+    @testset "persistent failure is retried and reported once" begin
+        testsuite = Dict(
+            "always_fails" => :( @test false ),
+            "passes" => :( @test true ),
+        )
+        io = IOBuffer()
+        @test_throws Test.FallbackTestSetException begin
+            ParallelTestRunner._runtests(
+                ParallelTestRunner, parse_args(["--jobs=1"]);
+                testsuite,
+                tests=["always_fails", "passes"],
+                historical_durations=Dict{String, Float64}(),
+                stdout=io,
+                stderr=io,
+                retries=2,
+            )
+        end
+        str = String(take!(io))
+        @test contains(str, "FAILURE")
+        # Both retry rounds run, and each of them fails again.
+        @test length(collect(eachmatch(r"always_fails failed again", str))) == 2
+        # Despite the three attempts, the test is reported exactly once, as a failure.
+        @test contains(str, r"always_fails +\| +1 +1 ")
+    end
+
+    @testset "retried test runs alone" begin
+        mktempdir() do dir
+            # On its retry, the flaky test checks it is the only worker left alive.
+            check_alone = quote
+                children = _count_child_pids($(getpid()))
+                if children >= 0
+                    @test children == 1
+                end
+            end
+            testsuite = Dict(
+                "flaky" => flaky_test(joinpath(dir, "flaky"), check_alone),
+                "pass1" => :( @test true ),
+                "pass2" => :( @test true ),
+                "pass3" => :( @test true ),
+            )
+            io = IOBuffer()
+            @show_if_error io ParallelTestRunner._runtests(
+                ParallelTestRunner, parse_args(["--jobs=3"]);
+                testsuite,
+                tests=["flaky", "pass1", "pass2", "pass3"],
+                historical_durations=Dict{String, Float64}(),
+                init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
+                stdout=io,
+                stderr=io,
+                retries=1,
+            )
+            str = String(take!(io))
+            @test contains(str, "flaky passed on retry")
+            @test contains(str, "SUCCESS")
+        end
+    end
+
+    @testset "no retries by default" begin
+        mktempdir() do dir
+            testsuite = Dict("flaky" => flaky_test(joinpath(dir, "flaky")))
+            io = IOBuffer()
+            @test_throws Test.FallbackTestSetException begin
+                ParallelTestRunner._runtests(
+                    ParallelTestRunner, parse_args(["--jobs=1"]);
+                    testsuite,
+                    tests=["flaky"],
+                    historical_durations=Dict{String, Float64}(),
+                    stdout=io,
+                    stderr=io,
+                )
+            end
+            str = String(take!(io))
+            @test !contains(str, "Retrying")
+            @test contains(str, "FAILURE")
+        end
+    end
+
+    @testset "quickfail skips retries" begin
+        mktempdir() do dir
+            testsuite = Dict(
+                "flaky" => flaky_test(joinpath(dir, "flaky")),
+                "passes" => :( @test true ),
+            )
+            io = IOBuffer()
+            @test_throws Test.FallbackTestSetException begin
+                ParallelTestRunner._runtests(
+                    ParallelTestRunner, parse_args(["--quickfail", "--jobs=1"]);
+                    testsuite,
+                    tests=["flaky", "passes"],
+                    historical_durations=Dict{String, Float64}(),
+                    stdout=io,
+                    stderr=io,
+                    retries=1,
+                )
+            end
+            str = String(take!(io))
+            # The run stopped early on purpose, retrying would defeat that.
+            @test !contains(str, "Retrying")
+            @test contains(str, "FAILURE")
+        end
+    end
+end
+
 # This testset should always be the last one, don't add anything after this.
 # We want to make sure there are no running workers at the end of the tests.
 @testset "no workers running" begin
