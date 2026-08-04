@@ -393,7 +393,7 @@ Arguments:
 - `custom_args` — the `custom_args` value forwarded from [`runtests`](@ref)
   (arbitrary, typically a `NamedTuple`).
 """
-function execute(::Type{TestRecord}, mod::Module, f, name, start_time, custom_args)
+function execute(::Type{TestRecord}, mod::Module, f, name, start_time, _custom_args)
     data = @eval mod begin
         GC.gc(true)
         Random.seed!(1)
