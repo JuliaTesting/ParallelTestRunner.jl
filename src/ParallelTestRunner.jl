@@ -780,7 +780,7 @@ When `--list` is requested, the full `testsuite` is preserved and `false` is
 returned so that callers skip any conditional filtering of their own: listing
 should show every available test, not just the ones that would run by default.
 """
-function filter_tests!(testsuite, args::ParsedArgs)
+function filter_tests!(testsuite::Dict{<:AbstractString, <:Any}, args::ParsedArgs)
     # when only listing tests, keep the full catalog and let the caller skip its
     # own filtering, so that every available test is shown
     args.list !== nothing && return false
@@ -1090,7 +1090,7 @@ function _runtests(mod::Module, args::ParsedArgs;
         if !done[]
             done[] = true
             for task in worker_tasks
-                task == current_task() && continue
+                task === current_task() && continue
                 Base.istaskdone(task) && continue
                 try; schedule(task, InterruptException(); error=true); catch; end
             end
@@ -1214,7 +1214,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                     got_message = true
                     msg_type = msg[1]
 
-                    if msg_type == :started
+                    if msg_type === :started
                         test_name, wrkr = msg[2], msg[3]
 
                         # Optionally print verbose started message
@@ -1223,7 +1223,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                             print_test_started(RecordType, wrkr, test_name, io_ctx)
                         end
 
-                    elseif msg_type == :finished
+                    elseif msg_type === :finished
                         test_name, wrkr, record = msg[2], msg[3], msg[4]
 
                         clear_status()
@@ -1233,7 +1233,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                             print_test_finished(record, wrkr, test_name, io_ctx)
                         end
 
-                    elseif msg_type == :crashed
+                    elseif msg_type === :crashed
                         test_name, wrkr = msg[2], msg[3]
 
                         clear_status()
