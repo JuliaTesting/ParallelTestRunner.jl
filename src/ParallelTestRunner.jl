@@ -1051,8 +1051,8 @@ function _runtests(mod::Module, args::ParsedArgs;
     serial_tests, parallel_tests = partition_tests(tests, serial)
 
     # determine parallelism
-    jobs = something(args.jobs, default_njobs())
-    jobs = clamp(jobs, 1, max(1, length(parallel_tests)))
+    _jobs = something(args.jobs, default_njobs())
+    jobs = clamp(_jobs, 1, max(1, length(parallel_tests)))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs
         put!(worker_pool, nothing)
@@ -1085,10 +1085,10 @@ function _runtests(mod::Module, args::ParsedArgs;
          (serial_tests, Base.Semaphore(1), serial_worker))
     end
 
-    done = false
+    done = Ref(false)
     function stop_work()
-        if !done
-            done = true
+        if !done[]
+            done[] = true
             for task in worker_tasks
                 task == current_task() && continue
                 Base.istaskdone(task) && continue
@@ -1242,7 +1242,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                 end
 
                 # After a while, display a status line
-                if !done && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 20))
+                if !done[] && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 20))
                     update_status()
                     last_status_update[] = time()
                 end
@@ -1315,7 +1315,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                               p = !isnothing(shared_worker) ? shared_worker[] : take!(worker_pool)
                               Threads.atomic_sub!(tests_to_start, 1)
 
-                              done && return
+                              done[] && return
 
                               # with multiple threads, tasks reach this point in arbitrary order,
                               # so pick the next test to run only now, rather than at spawn time,
@@ -1530,21 +1530,22 @@ function _runtests(mod::Module, args::ParsedArgs;
             for (testname, result, _output, start, stop) in results.value
                 push!(completed_tests, testname)
 
-                if result isa AbstractTestRecord
-                    testset = result[]::DefaultTestSet
+                testset = if result isa AbstractTestRecord
                     historical_durations[testname] = stop - start
                     # push to historical_failures on failure and delete on success
-                    push_or_delete! = anynonpass(testset) ? push! : delete!
+                    push_or_delete! = anynonpass(result[]) ? push! : delete!
                     push_or_delete!(historical_failures, testname)
+                    result[]
                 else
                     # If this test raised an exception that means the test runner itself had some problem,
                     # so we may have hit a segfault, deserialization errors or something similar.
                     # Record this testset as Errored.
                     # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
                     @assert result isa Exception
-                    testset = create_testset(testname; start, stop)
-                    Test.record(testset, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = result, backtrace = Union{Ptr{Nothing}, Base.InterpreterIP}[])]), LineNumberNode(1)))
+                    err_ts = create_testset(testname; start, stop)
+                    Test.record(err_ts, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = result, backtrace = Union{Ptr{Nothing}, Base.InterpreterIP}[])]), LineNumberNode(1)))
                     push!(historical_failures, testname)
+                    err_ts
                 end
 
                 with_testset(testset) do
