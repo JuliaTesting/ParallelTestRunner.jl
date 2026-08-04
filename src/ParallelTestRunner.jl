@@ -393,7 +393,7 @@ Arguments:
 - `custom_args` — the `custom_args` value forwarded from [`runtests`](@ref)
   (arbitrary, typically a `NamedTuple`).
 """
-function execute(::Type{TestRecord}, mod::Module, f, name, start_time, custom_args)
+function execute(::Type{TestRecord}, mod::Module, f, name, start_time, _custom_args)
     data = @eval mod begin
         GC.gc(true)
         Random.seed!(1)
@@ -780,7 +780,7 @@ When `--list` is requested, the full `testsuite` is preserved and `false` is
 returned so that callers skip any conditional filtering of their own: listing
 should show every available test, not just the ones that would run by default.
 """
-function filter_tests!(testsuite, args::ParsedArgs)
+function filter_tests!(testsuite::Dict{<:AbstractString, <:Any}, args::ParsedArgs)
     # when only listing tests, keep the full catalog and let the caller skip its
     # own filtering, so that every available test is shown
     args.list !== nothing && return false
@@ -1051,8 +1051,8 @@ function _runtests(mod::Module, args::ParsedArgs;
     serial_tests, parallel_tests = partition_tests(tests, serial)
 
     # determine parallelism
-    jobs = something(args.jobs, default_njobs())
-    jobs = clamp(jobs, 1, max(1, length(parallel_tests)))
+    _jobs = something(args.jobs, default_njobs())
+    jobs = clamp(_jobs, 1, max(1, length(parallel_tests)))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs
         put!(worker_pool, nothing)
@@ -1085,12 +1085,12 @@ function _runtests(mod::Module, args::ParsedArgs;
          (serial_tests, Base.Semaphore(1), serial_worker))
     end
 
-    done = false
+    done = Ref(false)
     function stop_work()
-        if !done
-            done = true
+        if !done[]
+            done[] = true
             for task in worker_tasks
-                task == current_task() && continue
+                task === current_task() && continue
                 Base.istaskdone(task) && continue
                 try; schedule(task, InterruptException(); error=true); catch; end
             end
@@ -1214,7 +1214,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                     got_message = true
                     msg_type = msg[1]
 
-                    if msg_type == :started
+                    if msg_type === :started
                         test_name, wrkr = msg[2], msg[3]
 
                         # Optionally print verbose started message
@@ -1223,7 +1223,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                             print_test_started(RecordType, wrkr, test_name, io_ctx)
                         end
 
-                    elseif msg_type == :finished
+                    elseif msg_type === :finished
                         test_name, wrkr, record = msg[2], msg[3], msg[4]
 
                         clear_status()
@@ -1233,7 +1233,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                             print_test_finished(record, wrkr, test_name, io_ctx)
                         end
 
-                    elseif msg_type == :crashed
+                    elseif msg_type === :crashed
                         test_name, wrkr = msg[2], msg[3]
 
                         clear_status()
@@ -1242,7 +1242,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                 end
 
                 # After a while, display a status line
-                if !done && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 20))
+                if !done[] && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 20))
                     update_status()
                     last_status_update[] = time()
                 end
@@ -1315,7 +1315,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                               p = !isnothing(shared_worker) ? shared_worker[] : take!(worker_pool)
                               Threads.atomic_sub!(tests_to_start, 1)
 
-                              done && return
+                              done[] && return
 
                               # with multiple threads, tasks reach this point in arbitrary order,
                               # so pick the next test to run only now, rather than at spawn time,
@@ -1530,21 +1530,22 @@ function _runtests(mod::Module, args::ParsedArgs;
             for (testname, result, _output, start, stop) in results.value
                 push!(completed_tests, testname)
 
-                if result isa AbstractTestRecord
-                    testset = result[]::DefaultTestSet
+                testset = if result isa AbstractTestRecord
                     historical_durations[testname] = stop - start
                     # push to historical_failures on failure and delete on success
-                    push_or_delete! = anynonpass(testset) ? push! : delete!
+                    push_or_delete! = anynonpass(result[]) ? push! : delete!
                     push_or_delete!(historical_failures, testname)
+                    result[]
                 else
                     # If this test raised an exception that means the test runner itself had some problem,
                     # so we may have hit a segfault, deserialization errors or something similar.
                     # Record this testset as Errored.
                     # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
                     @assert result isa Exception
-                    testset = create_testset(testname; start, stop)
-                    Test.record(testset, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = result, backtrace = Union{Ptr{Nothing}, Base.InterpreterIP}[])]), LineNumberNode(1)))
+                    err_ts = create_testset(testname; start, stop)
+                    Test.record(err_ts, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = result, backtrace = Union{Ptr{Nothing}, Base.InterpreterIP}[])]), LineNumberNode(1)))
                     push!(historical_failures, testname)
+                    err_ts
                 end
 
                 with_testset(testset) do
