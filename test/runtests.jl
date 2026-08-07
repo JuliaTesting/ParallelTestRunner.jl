@@ -1347,7 +1347,7 @@ end
             serial
         )
 
-        str = String(take!(io)); print(str)
+        str = String(take!(io))
         @test contains(str, "SUCCESS")
 
         # create a mapping of test names to the character offset of their start times (lower is earlier)
