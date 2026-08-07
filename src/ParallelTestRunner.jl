@@ -1507,14 +1507,27 @@ function _runtests(mod::Module, args::ParsedArgs;
                         "Retrying $(length(retryable)) failed test(s) on a fresh worker...\n";
                         color = :yellow)
             for test in retryable
-                if retry_wrkr === nothing || !Malt.isrunning(retry_wrkr)
-                    retry_wrkr = addworker(; init_worker_code, io_ctx.color, exename,
-                                           exeflags, env)
+                # pass in init_worker_code to custom worker function if defined
+                wrkr = if init_worker_code == :()
+                    test_worker(test)
+                else
+                    test_worker(test, init_worker_code)
+                end
+                if wrkr !== nothing && !Malt.isrunning(wrkr)
+                    wrkr = nothing
+                end
+                custom = wrkr !== nothing
+                if !custom
+                    if retry_wrkr === nothing || !Malt.isrunning(retry_wrkr)
+                        retry_wrkr = addworker(; init_worker_code, io_ctx.color, exename,
+                                               exeflags, env)
+                    end
+                    wrkr = retry_wrkr
                 end
                 test_t0 = time()
                 result = try
-                    Malt.remote_eval_wait(Main, retry_wrkr.w, :(import ParallelTestRunner))
-                    Malt.remote_call_fetch(invokelatest, retry_wrkr.w, runtest,
+                    Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
+                    Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
                                            RecordType, testsuite[test], test,
                                            init_code, test_t0, custom_args)
                 catch ex
@@ -1522,16 +1535,22 @@ function _runtests(mod::Module, args::ParsedArgs;
                     ex
                 end
                 test_t1 = time()
-                output = @lock retry_wrkr.io String(take!(retry_wrkr.io[]))
+                output = @lock wrkr.io String(take!(wrkr.io[]))
                 filter!(r -> r.test != test, results.value)
                 push!(results.value, (; test, result, output, test_t0, test_t1))
                 if result isa AbstractTestRecord && !anynonpass(result[])
                     printstyled(io_ctx.stdout, "  $test passed on retry\n"; color = :green)
                 else
                     printstyled(io_ctx.stdout, "  $test failed again\n"; color = :red)
-                    # don't let a failure contaminate the next retry
-                    Malt.stop(retry_wrkr)
-                    retry_wrkr = nothing
+                    if !custom
+                        # don't let a failure contaminate the next retry
+                        Malt.stop(retry_wrkr)
+                        retry_wrkr = nothing
+                    end
+                end
+                # get rid of the custom worker
+                if custom && Malt.isrunning(wrkr)
+                    Malt.stop(wrkr)
                 end
             end
         end
