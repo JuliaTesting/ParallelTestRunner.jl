@@ -168,6 +168,7 @@ struct TestIOContext
     alloc_align::Int
     rss_align::Int
     max_worker_rss::Int
+    nonpass_face::Ref{Symbol}
 end
 
 function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, verbose::Bool, max_worker_rss::Int)
@@ -182,7 +183,7 @@ function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lo
 
     return TestIOContext(
         stdout, stderr, color, verbose, lock, name_align, elapsed_align, compile_align, gc_align, percent_align,
-        alloc_align, rss_align, max_worker_rss
+        alloc_align, rss_align, max_worker_rss, Ref(:ptr_error)
     )
 end
 
@@ -292,7 +293,7 @@ function print_test_failed(record::AbstractTestRecord, wrkr, test, ctx::TestIOCo
 
         # TODO: print other stats?
 
-        out_str = styled"{ptr_error:$test$padded_wrkr │$padded_time │$padded_init_time$failed_str}\n"
+        out_str = styled"{$(ctx.nonpass_face[]):$test$padded_wrkr │$padded_time │$padded_init_time$failed_str}\n"
         print(ctx.stderr, out_str)
         flush(ctx.stderr)
     finally
@@ -304,7 +305,7 @@ function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        out_str = styled"{ptr_error:$(test)$padded_wrkr │$(\" \"^ctx.elapsed_align) crashed at $(now())}\n"
+        out_str = styled"{$(ctx.nonpass_face[]):$(test)$padded_wrkr │$(\" \"^ctx.elapsed_align) crashed at $(now())}\n"
         print(ctx.stderr, out_str)
         flush(ctx.stderr)
     finally
@@ -1490,6 +1491,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     end
     try
         phases = test_phases
+        retries > 0 && (io_ctx.nonpass_face[] = :ptr_warn)
         for i in 1:length(phases)
             phase_tests, sem, shared_worker = phases[i]
             isempty(phase_tests) && continue
@@ -1508,11 +1510,12 @@ function _runtests(mod::Module, args::ParsedArgs;
 
         # retries
         for i in 1:retries
+            retries == i && (io_ctx.nonpass_face[] = :ptr_error)
             retry_tests = [r.test for r in results.value
                                 if r.result isa Exception || anynonpass(r.result[])]
             isempty(retry_tests) && break
 
-            println(io_ctx.stdout, "Retrying $(length(retry_tests)) failed tests ($i)")
+            println(io_ctx.stdout, styled"{ptr_default:Retrying $(length(retry_tests)) failed tests ($i)}")
             sem = Base.Semaphore(1)
             shared_worker = serial_worker
             filter!(r -> r.test ∉ retry_tests, results.value)
