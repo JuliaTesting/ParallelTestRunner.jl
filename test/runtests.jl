@@ -1483,7 +1483,6 @@ end
                 ParallelTestRunner, parse_args(["--jobs=1"]);
                 testsuite,
                 tests,
-                historical_durations=Dict{String, Float64}(),
                 stdout=io,
                 stderr=io,
             )
@@ -1502,7 +1501,6 @@ end
                 ParallelTestRunner, parse_args(["--jobs=1"]);
                 testsuite,
                 tests,
-                historical_durations=Dict{String, Float64}(),
                 stdout=io,
                 stderr=io,
                 recycle_on_failure=true,
@@ -1540,7 +1538,6 @@ end
                 ParallelTestRunner, parse_args(["--jobs=1"]);
                 testsuite,
                 tests=["flaky", "passes"],
-                historical_durations=Dict{String, Float64}(),
                 stdout=io,
                 stderr=io,
                 retries=1,
@@ -1568,7 +1565,6 @@ end
                 ParallelTestRunner, parse_args(["--jobs=1"]);
                 testsuite,
                 tests=["always_fails", "passes"],
-                historical_durations=Dict{String, Float64}(),
                 stdout=io,
                 stderr=io,
                 retries=2,
@@ -1602,7 +1598,6 @@ end
                 ParallelTestRunner, parse_args(["--jobs=3"]);
                 testsuite,
                 tests=["flaky", "pass1", "pass2", "pass3"],
-                historical_durations=Dict{String, Float64}(),
                 init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
                 stdout=io,
                 stderr=io,
@@ -1623,7 +1618,6 @@ end
                     ParallelTestRunner, parse_args(["--jobs=1"]);
                     testsuite,
                     tests=["flaky"],
-                    historical_durations=Dict{String, Float64}(),
                     stdout=io,
                     stderr=io,
                 )
@@ -1646,7 +1640,6 @@ end
                     ParallelTestRunner, parse_args(["--quickfail", "--jobs=1"]);
                     testsuite,
                     tests=["flaky", "passes"],
-                    historical_durations=Dict{String, Float64}(),
                     stdout=io,
                     stderr=io,
                     retries=1,
