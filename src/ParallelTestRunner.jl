@@ -1302,6 +1302,18 @@ function _runtests(mod::Module, args::ParsedArgs;
 
                         clear_status()
                         print_test_crashed(RecordType, wrkr, test_name, io_ctx)
+
+                    elseif msg_type === :retry
+                        tests_n, retry_n = msg[2], msg[3]
+
+                        clear_status()
+                        lock(io_ctx.lock)
+                        try
+                            println(io_ctx.stdout, styled"{ptr_default:Retrying $tests_n failed test$(tests_n > 1 ? \"s\" : \" \") ($retry_n)}")
+                            flush(io_ctx.stdout)
+                        finally
+                            unlock(io_ctx.lock)
+                        end
                     end
                 end
 
@@ -1515,7 +1527,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                                 if r.result isa Exception || anynonpass(r.result[])]
             isempty(retry_tests) && break
 
-            println(io_ctx.stdout, styled"{ptr_default:Retrying $(length(retry_tests)) failed tests ($i)}")
+            put!(printer_channel, (:retry, length(retry_tests), i))
             sem = Base.Semaphore(1)
             shared_worker = serial_worker
             filter!(r -> r.test ∉ retry_tests, results.value)
