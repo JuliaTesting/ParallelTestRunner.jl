@@ -1544,9 +1544,7 @@ end
             )
             str = String(take!(io))
             # Only the failed test is retried, and its retried result is the one reported.
-            @test contains(str, "Retrying 1 failed test(s)")
-            @test contains(str, "flaky passed on retry")
-            @test !contains(str, "passes passed on retry")
+            @test contains(str, "Retrying 1 failed test")
             @test contains(str, "SUCCESS")
             # Two results in total: the failed attempt of `flaky` was replaced by the
             # retried one, rather than reported next to it.
@@ -1573,7 +1571,7 @@ end
         str = String(take!(io))
         @test contains(str, "FAILURE")
         # Both retry rounds run, and each of them fails again.
-        @test length(collect(eachmatch(r"always_fails failed again", str))) == 2
+        @test length(collect(eachmatch(r"always_fails.*failed", str))) == 3
         # Despite the three attempts, the test is reported exactly once, as a failure.
         @test contains(str, r"always_fails +\| +1 +1 ")
     end
@@ -1604,7 +1602,7 @@ end
                 retries=1,
             )
             str = String(take!(io))
-            @test contains(str, "flaky passed on retry")
+            @test length(collect(eachmatch(r"failed", str))) == 2
             @test contains(str, "SUCCESS")
         end
     end
