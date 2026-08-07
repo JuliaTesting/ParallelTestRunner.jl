@@ -1526,7 +1526,6 @@ function _runtests(mod::Module, args::ParsedArgs;
                 end
                 test_t0 = time()
                 result = try
-                    Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
                     Malt.remote_call_fetch(invokelatest, wrkr.w, runtest,
                                            RecordType, testsuite[test], test,
                                            init_code, test_t0, custom_args)
