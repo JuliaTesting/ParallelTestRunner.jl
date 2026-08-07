@@ -833,7 +833,9 @@ end
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss(),
              serial = String[],
-             serial_position::Symbol = :before)
+             serial_position::Symbol = :before,
+             recycle_on_failure::Bool = false,
+             retries::Integer = 0)
     runtests(mod::Module, ARGS; ...)
 
 Run Julia tests in parallel across multiple worker processes.
@@ -880,6 +882,10 @@ Several keyword arguments are also supported:
   instead of in parallel. An `ArgumentError` is thrown if any name is not found in the testsuite.
 - `serial_position`: When to run serial tests relative to the parallel batch.
   Must be `:before` (default) or `:after`.
+- `recycle_on_failure`: Whether to recycle a worker after any test that did not pass
+  (default: `false`). See the Failure Handling section below.
+- `retries`: How many times to re-run tests that did not pass after the main run completes
+  (default: `0`). See the Failure Handling section below.
 
 ## Command Line Options
 
