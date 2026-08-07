@@ -746,6 +746,7 @@ function parse_args(args; custom::Array{String} = String[])
             end
         end
         usage *= "\n\nRemaining arguments filter the tests that will be executed."
+        usage *= "\nPrefix your argument with '!' to instead exclude those tests"
         println(usage)
         exit(0)
     end
@@ -788,11 +789,27 @@ function filter_tests!(testsuite::Dict{<:AbstractString, <:Any}, args::ParsedArg
     # the user did not request specific tests, so let the caller do its own filtering
     isempty(args.positionals) && return true
 
+    exclude_idxs = startswith.(args.positionals, "!")
+    exclude_args = lstrip.(args.positionals[exclude_idxs], Ref(['!']))
+    include_args = args.positionals[.!exclude_idxs]
+
     # only select tests matching positional arguments
     tests = collect(keys(testsuite))
-    for test in tests
-        if !any(arg -> startswith(test, arg), args.positionals)
-            delete!(testsuite, test)
+    if !isempty(include_args)
+        for test in tests
+            if !any(arg -> startswith(test, arg), include_args)
+                delete!(testsuite, test)
+            end
+        end
+    end
+
+    # remove explicitly excluded tests
+    included_tests = collect(keys(testsuite))
+    if !isempty(exclude_args)
+        for test in included_tests
+            if any(arg -> startswith(test, arg), exclude_args)
+                delete!(testsuite, test)
+            end
         end
     end
 
@@ -888,7 +905,7 @@ Several keyword arguments are also supported:
 - `--verbose`: Print more detailed information during test execution
 - `--quickfail`: Stop the entire test run as soon as any test fails
 - `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory)
-- `TESTS...`: Filter test files by name, matched using `startswith`
+- `TESTS...`: Filter test files by name, matched using `startswith`. Arguments starting with '!' will instead be excluded from the test selection.
 
 ## Behavior
 

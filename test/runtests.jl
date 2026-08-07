@@ -743,6 +743,26 @@ end
         @test !haskey(testsuite, "perf/d")
     end
 
+    @testset "exclude tests basic" begin
+        testsuite = Dict("unit/a" => :(), "unit/b" => :(), "integration/c" => :(), "perf/d" => :())
+        args = parse_args(["!unit"])
+        @test filter_tests!(testsuite, args) == false
+        @test !haskey(testsuite, "unit/a")
+        @test !haskey(testsuite, "unit/b")
+        @test haskey(testsuite, "integration/c")
+        @test haskey(testsuite, "perf/d")
+    end
+
+    @testset "exclude included tests" begin
+        testsuite = Dict("unit/a" => :(), "unit/b" => :(), "integration/c" => :(), "perf/d" => :())
+        args = parse_args(["unit", "!unit/a"])
+        @test filter_tests!(testsuite, args) == false
+        @test !haskey(testsuite, "unit/a")
+        @test haskey(testsuite, "unit/b")
+        @test !haskey(testsuite, "integration/c")
+        @test !haskey(testsuite, "perf/d")
+    end
+
     @testset "no matches yields empty suite" begin
         testsuite = Dict("a" => :(), "b" => :())
         args = parse_args(["nonexistent"])
