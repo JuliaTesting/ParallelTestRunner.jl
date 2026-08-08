@@ -313,6 +313,16 @@ function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     end
 end
 
+# Truncate `line` to at most `max_width` characters, appending "..." when truncated.
+# Slicing by character (rather than by byte index) keeps this safe for test names
+# containing multi-byte characters.
+function truncate_line(line::AbstractString, max_width::Int)
+    if length(line) > max_width
+        line = first(line, max(0, max_width - 3)) * "..."
+    end
+    return line
+end
+
 # Adapted from `Malt._stdio_loop`
 function stdio_loop(worker::Malt.Worker, io::Lockable)
     Threads.@spawn while !eof(worker.stdout) && Malt.isrunning(worker)
@@ -1191,9 +1201,7 @@ function _runtests(mod::Module, args::ParsedArgs;
         line2 = "Running:  " * join(status_parts, ", ")
         ## truncate
         max_width = displaysize(io_ctx.stdout)[2]
-        if length(line2) > max_width
-            line2 = line2[1:max_width-3] * "..."
-        end
+        line2 = truncate_line(line2, max_width)
 
         # line 3: progress + ETA
         line3 = "Progress: $completed/$total tests completed"

@@ -884,6 +884,26 @@ end
     @test any(contains("--color=yes"), exe.exec)
 end
 
+@testset "truncate_line" begin
+    # short lines are untouched
+    @test ParallelTestRunner.truncate_line("short", 80) == "short"
+    @test ParallelTestRunner.truncate_line("x"^80, 80) == "x"^80
+
+    truncated = ParallelTestRunner.truncate_line("x"^100, 80)
+    @test length(truncated) == 80
+    @test endswith(truncated, "...")
+
+    # multi-byte characters must not break the cut: with byte indexing these
+    # would throw a StringIndexError when the cut lands mid-character
+    truncated = ParallelTestRunner.truncate_line("t" * "α"^100, 80)
+    @test length(truncated) == 80
+    @test endswith(truncated, "...")
+
+    truncated = ParallelTestRunner.truncate_line("€"^100, 40)
+    @test length(truncated) == 40
+    @test endswith(truncated, "...")
+end
+
 @testset "TestHistoryEntry" begin
     flow = ParallelTestRunner.TestHistoryEntry(1,true)
     fhigh = ParallelTestRunner.TestHistoryEntry(10,true)
