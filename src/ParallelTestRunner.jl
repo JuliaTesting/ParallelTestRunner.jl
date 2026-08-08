@@ -1458,29 +1458,39 @@ function _runtests(mod::Module, args::ParsedArgs;
     # finalization
     #
 
-    # wait for the printer to finish so that all results have been printed
-    close(printer_channel)
-    wait(printer_task)
+    try
+        # wait for the printer to finish so that all results have been printed
+        close(printer_channel)
+        wait(printer_task)
 
-    # wait for worker tasks to catch unhandled exceptions
-    for task in worker_tasks
-        try
-            wait(task)
-        catch err
-            # unwrap TaskFailedException
-            while isa(err, TaskFailedException)
-                err = current_exceptions(err.task)[1].exception
+        # wait for worker tasks to catch unhandled exceptions
+        for task in worker_tasks
+            try
+                wait(task)
+            catch err
+                # unwrap TaskFailedException
+                while isa(err, TaskFailedException)
+                    err = current_exceptions(err.task)[1].exception
+                end
+
+                isa(err, InterruptException) || rethrow()
             end
-
-            isa(err, InterruptException) || rethrow()
         end
-    end
+    finally
+        # clean up remaining workers even when a worker or printer task failed and
+        # its exception is propagated, so worker processes don't outlive the run
 
-    # clean up remaining workers in the pool
-    close(worker_pool)
-    for p in worker_pool
-        if p !== nothing && Malt.isrunning(p)
-            Malt.stop(p)
+        # a failure during a serial phase can leave the shared worker in its Ref
+        # instead of the pool
+        if serial_worker[] !== nothing && Malt.isrunning(serial_worker[])
+            Malt.stop(serial_worker[])
+        end
+
+        close(worker_pool)
+        for p in worker_pool
+            if p !== nothing && Malt.isrunning(p)
+                Malt.stop(p)
+            end
         end
     end
 

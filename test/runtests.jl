@@ -1207,6 +1207,49 @@ end
         @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + jobs + 1
     end
 
+    @testset "workers stopped when a task fails" begin
+        # a `test_worker` hook throwing during the serial phase strands the shared
+        # worker outside the pool while the task failure is rethrown from
+        # finalization; the worker process must still be stopped
+        before = _count_child_pids()
+        if before < 0
+            # counting child PIDs not supported on this platform
+            @test_skip false
+        else
+            testsuite = Dict(
+                "s1" => :( @test true ),
+                "s2" => :( @test true ),
+            )
+            exception = ErrorException("test_worker exploded")
+            test_worker(name) = name == "s2" ? throw(exception) : nothing
+            io = IOBuffer()
+            try
+                ParallelTestRunner._runtests(
+                    ParallelTestRunner, parse_args(["--jobs=1"]);
+                    testsuite,
+                    tests=["s1", "s2"],
+                    serial=["s1", "s2"],
+                    test_worker,
+                    stdout=io,
+                    stderr=io,
+                )
+                # the error must propagate out of `_runtests`
+                @test false
+            catch e
+                @test typeof(e) === TaskFailedException
+                @test first(Base.current_exceptions(e.task)).exception == exception
+            end
+            # allow a moment for worker processes to exit
+            after = -1
+            for _ in 1:50
+                sleep(0.1)
+                after = _count_child_pids()
+                after >= 0 && after <= before && break
+            end
+            @test after == before
+        end
+    end
+
     @testset "quickfail in serial phase before parallel" begin
         # The failing serial test runs first: the remaining serial tests and the whole
         # parallel batch should never be started.
