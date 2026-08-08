@@ -280,7 +280,7 @@ function print_test_failed(record::AbstractTestRecord, wrkr, test, ctx::TestIOCo
 
         if ctx.verbose
             init_time_str = @sprintf("%7.2f", base.total_time - base.time)
-            printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align + 1, " "), " │ ", color = :red)
+            printstyled(ctx.stderr, lpad(init_time_str, ctx.elapsed_align + 1, " "), " │ ", color = :red)
         end
 
         failed_str = "failed at $(now())\n"

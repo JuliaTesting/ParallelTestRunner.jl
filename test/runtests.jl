@@ -346,6 +346,30 @@ end
     @test contains(str, "1 == 2")
 end
 
+@testset "failed test row printed entirely to stderr" begin
+    testsuite = Dict(
+        "failing test" => quote
+            @test 1 == 2
+        end
+    )
+
+    # use separate streams: the whole row of a failed test must go to stderr
+    out = IOBuffer()
+    err = IOBuffer()
+    @test_throws Test.FallbackTestSetException("Test run finished with errors") begin
+        runtests(ParallelTestRunner, ["--verbose"]; testsuite, stdout=out, stderr=err)
+    end
+
+    outs = String(take!(out))
+    errs = String(take!(err))
+    m = match(r"failing test[^\n]*failed at", errs)
+    @test m !== nothing
+    # in verbose mode the row has three cell separators (time, init time) on
+    # stderr; the init-time cell used to leak to stdout instead
+    @test m !== nothing && count("│", m.match) == 3
+    @test !contains(outs, "failed at")
+end
+
 @testset "nested failure" begin
     testsuite = Dict(
         "nested" => quote
