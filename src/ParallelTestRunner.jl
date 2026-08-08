@@ -691,16 +691,23 @@ end
 # parse some command-line arguments
 function extract_flag!(args, flag; typ = Nothing)
     for f in args
-        if startswith(f, flag)
+        # only accept the exact flag or `--flag=value`, so that flags sharing a
+        # prefix (e.g. `--list` and `--listing`) don't capture each other
+        if f == flag || startswith(f, flag * "=")
             # Check if it's just `--flag` or if it's `--flag=foo`
             val = if f == flag
+                typ === Nothing ||
+                    error("Option `$flag` requires a value (use `$flag=<value>`)")
                 nothing
             else
-                parts = split(f, '=')
+                _, value = split(f, '='; limit = 2)
                 if typ === Nothing || typ <: AbstractString
-                    parts[2]
+                    value
                 else
-                    parse(typ, parts[2])
+                    parsed = tryparse(typ, value)
+                    parsed === nothing &&
+                        error("Invalid value `$value` for option `$flag` (expected a value of type $typ)")
+                    parsed
                 end
             end
 
@@ -755,6 +762,13 @@ function parse_args(args; custom::Array{String} = String[])
     verbose = extract_flag!(args, "--verbose")
     quickfail = extract_flag!(args, "--quickfail")
     list = extract_flag!(args, "--list")
+
+    # boolean flags don't take values
+    for (flag, val) in (("--verbose", verbose), ("--quickfail", quickfail), ("--list", list))
+        if val isa Some && something(val) !== nothing
+            error("Option `$flag` does not take a value")
+        end
+    end
 
     custom_args = Dict{String,Any}()
     for flag in custom
@@ -894,7 +908,8 @@ Several keyword arguments are also supported:
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
 - `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time
-  instead of in parallel. An `ArgumentError` is thrown if any name is not found in the testsuite.
+  instead of in parallel. An `ArgumentError` is thrown if any name is not found in the
+  testsuite; names that are valid but deselected by command-line filtering are ignored.
 - `serial_position`: When to run serial tests relative to the parallel batch.
   Must be `:before` (default) or `:after`.
 
@@ -1007,6 +1022,13 @@ function runtests(mod::Module, args::ParsedArgs;
     # validate serial_position
     serial_position in (:before, :after) ||
         throw(ArgumentError("serial_position must be :before or :after, got :$serial_position"))
+
+    # validate serial names against the full testsuite, so that typos are caught even when
+    # command-line filtering would silently drop them below
+    unknown_serial = setdiff(serial, keys(testsuite))
+    if !isempty(unknown_serial)
+        throw(ArgumentError("serial test(s) not found in testsuite: $(join(sort!(unknown_serial), ", "))"))
+    end
 
     # filter tests
     filter_tests!(testsuite, args)

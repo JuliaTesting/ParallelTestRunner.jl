@@ -654,6 +654,26 @@ end
     result = ParallelTestRunner.extract_flag!(args, "--format")
     @test something(result) == "json"
     @test isempty(args)
+
+    # values containing `=` are preserved
+    args = ["--format=key=value"]
+    result = ParallelTestRunner.extract_flag!(args, "--format")
+    @test something(result) == "key=value"
+    @test isempty(args)
+
+    # flags sharing a prefix are not captured
+    args = ["--listing"]
+    result = ParallelTestRunner.extract_flag!(args, "--list")
+    @test result === nothing
+    @test args == ["--listing"]
+
+    # a typed flag without a value is an error
+    args = ["--jobs"]
+    @test_throws ErrorException ParallelTestRunner.extract_flag!(args, "--jobs"; typ=Int)
+
+    # a typed flag with an unparseable value is an error
+    args = ["--jobs=abc"]
+    @test_throws ErrorException ParallelTestRunner.extract_flag!(args, "--jobs"; typ=Int)
 end
 
 @testset "parse_args" begin
@@ -703,6 +723,24 @@ end
     @testset "unknown flags" begin
         @test_throws ErrorException parse_args(["--unknown-flag"])
         @test_throws ErrorException parse_args(["--verbose", "--bogus"])
+    end
+
+    @testset "malformed and lookalike flags" begin
+        # prefix lookalikes are unknown options, not misparsed builtin flags
+        @test_throws ErrorException parse_args(["--verbose-foo"])
+        @test_throws ErrorException parse_args(["--jobs2=3"])
+
+        # a custom flag sharing a builtin's prefix is not captured by the builtin
+        args = parse_args(["--listing"]; custom=["listing"])
+        @test args.list === nothing
+        @test args.custom["listing"] !== nothing
+
+        # missing or invalid values produce a clean error
+        @test_throws ErrorException parse_args(["--jobs"])
+        @test_throws ErrorException parse_args(["--jobs=abc"])
+
+        # boolean flags reject values
+        @test_throws ErrorException parse_args(["--verbose=5"])
     end
 
     @testset "no arguments" begin
@@ -1034,6 +1072,18 @@ end
             tests = ["a", "b"]
             @test_throws ArgumentError ParallelTestRunner.partition_tests(tests, ["a", "missing"])
         end
+    end
+
+    @testset "unknown serial name throws in runtests" begin
+        # the typo must be reported even though positional filtering would have
+        # silently dropped it from the serial list
+        testsuite = Dict("a" => :(), "b" => :())
+        @test_throws ArgumentError runtests(ParallelTestRunner, String[];
+                                            testsuite, stdout=devnull, stderr=devnull,
+                                            serial=["a", "typo"])
+        @test_throws ArgumentError runtests(ParallelTestRunner, ["a"];
+                                            testsuite, stdout=devnull, stderr=devnull,
+                                            serial=["a", "typo"])
     end
 
     @testset "serial tests run before parallel (default)" begin
