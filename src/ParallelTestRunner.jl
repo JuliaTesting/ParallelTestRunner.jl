@@ -691,16 +691,23 @@ end
 # parse some command-line arguments
 function extract_flag!(args, flag; typ = Nothing)
     for f in args
-        if startswith(f, flag)
+        # only accept the exact flag or `--flag=value`, so that flags sharing a
+        # prefix (e.g. `--list` and `--listing`) don't capture each other
+        if f == flag || startswith(f, flag * "=")
             # Check if it's just `--flag` or if it's `--flag=foo`
             val = if f == flag
+                typ === Nothing ||
+                    error("Option `$flag` requires a value (use `$flag=<value>`)")
                 nothing
             else
-                parts = split(f, '=')
+                _, value = split(f, '='; limit = 2)
                 if typ === Nothing || typ <: AbstractString
-                    parts[2]
+                    value
                 else
-                    parse(typ, parts[2])
+                    parsed = tryparse(typ, value)
+                    parsed === nothing &&
+                        error("Invalid value `$value` for option `$flag` (expected a value of type $typ)")
+                    parsed
                 end
             end
 
@@ -755,6 +762,13 @@ function parse_args(args; custom::Array{String} = String[])
     verbose = extract_flag!(args, "--verbose")
     quickfail = extract_flag!(args, "--quickfail")
     list = extract_flag!(args, "--list")
+
+    # boolean flags don't take values
+    for (flag, val) in (("--verbose", verbose), ("--quickfail", quickfail), ("--list", list))
+        if val isa Some && something(val) !== nothing
+            error("Option `$flag` does not take a value")
+        end
+    end
 
     custom_args = Dict{String,Any}()
     for flag in custom
