@@ -1521,18 +1521,20 @@ function _runtests(mod::Module, args::ParsedArgs;
         end
 
         # retries
-        for i in 1:retries
-            retries == i && (io_ctx.nonpass_face[] = :ptr_error)
-            retry_tests = [r.test for r in results.value
-                                if r.result isa Exception || anynonpass(r.result[])]
-            isempty(retry_tests) && break
+        if retries > 0 && !interrupted && args.quickfail === nothing
+            for i in 1:retries
+                retries == i && (io_ctx.nonpass_face[] = :ptr_error)
+                retry_tests = [r.test for r in results.value
+                                    if r.result isa Exception || anynonpass(r.result[])]
+                isempty(retry_tests) && break
 
-            put!(printer_channel, (:retry, length(retry_tests), i))
-            sem = Base.Semaphore(1)
-            shared_worker = serial_worker
-            filter!(r -> r.test ∉ retry_tests, results.value)
+                put!(printer_channel, (:retry, length(retry_tests), i))
+                sem = Base.Semaphore(1)
+                shared_worker = serial_worker
+                filter!(r -> r.test ∉ retry_tests, results.value)
 
-            run_test_phase(retry_tests, sem, shared_worker)
+                run_test_phase(retry_tests, sem, shared_worker)
+            end
         end
     catch err
         interrupted = true
