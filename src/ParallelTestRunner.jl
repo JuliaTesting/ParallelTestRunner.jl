@@ -894,7 +894,8 @@ Several keyword arguments are also supported:
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
 - `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time
-  instead of in parallel. An `ArgumentError` is thrown if any name is not found in the testsuite.
+  instead of in parallel. An `ArgumentError` is thrown if any name is not found in the
+  testsuite; names that are valid but deselected by command-line filtering are ignored.
 - `serial_position`: When to run serial tests relative to the parallel batch.
   Must be `:before` (default) or `:after`.
 
@@ -1007,6 +1008,13 @@ function runtests(mod::Module, args::ParsedArgs;
     # validate serial_position
     serial_position in (:before, :after) ||
         throw(ArgumentError("serial_position must be :before or :after, got :$serial_position"))
+
+    # validate serial names against the full testsuite, so that typos are caught even when
+    # command-line filtering would silently drop them below
+    unknown_serial = setdiff(serial, keys(testsuite))
+    if !isempty(unknown_serial)
+        throw(ArgumentError("serial test(s) not found in testsuite: $(join(sort!(unknown_serial), ", "))"))
+    end
 
     # filter tests
     filter_tests!(testsuite, args)
