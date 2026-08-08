@@ -1272,7 +1272,6 @@ end
             )
             exception = ErrorException("test_worker exploded")
             test_worker(name) = name == "s2" ? throw(exception) : nothing
-            io = IOBuffer()
             try
                 ParallelTestRunner._runtests(
                     ParallelTestRunner, parse_args(["--jobs=1"]);
@@ -1280,8 +1279,8 @@ end
                     tests=["s1", "s2"],
                     serial=["s1", "s2"],
                     test_worker,
-                    stdout=io,
-                    stderr=io,
+                    stdout=devnull,
+                    stderr=devnull,
                 )
                 # the error must propagate out of `_runtests`
                 @test false
