@@ -314,8 +314,6 @@ function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
 end
 
 # Truncate `line` to at most `max_width` characters, appending "..." when truncated.
-# Slicing by character (rather than by byte index) keeps this safe for test names
-# containing multi-byte characters.
 function truncate_line(line::AbstractString, max_width::Int)
     if length(line) > max_width
         line = first(line, max(0, max_width - 3)) * "..."
