@@ -1501,7 +1501,10 @@ function _runtests(mod::Module, args::ParsedArgs;
     end
     try
         phases = test_phases
-        retries > 0 && (io_ctx.nonpass_face[] = :ptr_warn)
+
+        potential_retries = retries > 0 && !interrupted && args.quickfail === nothing
+
+        potential_retries && (io_ctx.nonpass_face[] = :ptr_warn)
         for i in 1:length(phases)
             phase_tests, sem, shared_worker = phases[i]
             isempty(phase_tests) && continue
@@ -1519,7 +1522,7 @@ function _runtests(mod::Module, args::ParsedArgs;
         end
 
         # retries
-        if retries > 0 && !interrupted && args.quickfail === nothing
+        if potential_retries
             for i in 1:retries
                 retries == i && (io_ctx.nonpass_face[] = :ptr_error)
                 retry_tests = [r.test for r in results.value
