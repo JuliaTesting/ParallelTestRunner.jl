@@ -1012,7 +1012,7 @@ With `recycle_on_failure = true`, a worker is recycled after any test that did n
 a test that corrupts process-wide state (e.g. wedges a GPU driver) cannot poison subsequent
 tests on the same worker.
 
-With `retries = N` (default 0), tests that did not pass are re-run sequantially up to `N`
+With `retries = N` (default 0), tests that did not pass are re-run sequentially up to `N`
 times after the main run completes. Only the final attempt of each test is reported.
 """
 function runtests(mod::Module, args::ParsedArgs;
