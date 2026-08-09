@@ -189,11 +189,10 @@ runtests(MyPackage, ARGS; recycle_on_failure=true)
 ```
 
 This complements the existing recycling of workers exceeding `max_worker_rss` and of workers that crashed outright.
-The cost is worker start-up time (plus re-running `init_worker_code`) after each failure, which is why it is off by default: for a suite whose failures are self-contained it is pure overhead.
 
 ### Retrying Failed Tests
 
-When several workers compete for a limited resource — GPU memory, RAM, a device that only allows so many contexts — a failure can mean "lost the race for the resource" rather than "the code is broken".
+When several workers compete for a limited resource (usually memory), a failure can mean "lost the race for the resource" rather than "the code is broken".
 Such a test typically passes when run on its own.
 
 The `retries` keyword argument re-runs tests that did not pass, up to `N` times, after the main run has completed:
@@ -202,16 +201,15 @@ The `retries` keyword argument re-runs tests that did not pass, up to `N` times,
 runtests(MyPackage, ARGS; retries=1)
 ```
 
-The retry environment is deliberately quiesced: all parallel workers have been stopped by then, and the retried tests run **sequentially on a single fresh worker**, so a test that failed only because of concurrent resource pressure gets an otherwise-idle system.
+Retried tests run **sequentially on a single fresh worker**, so a test that failed only because of concurrent resource pressure gets an otherwise-idle system.
 If a test fails again, its worker is stopped before the next retry, so one failure cannot contaminate the following one.
 
-Only the final attempt of each test is recorded in the results, so a test that passes on retry is reported as passing and a persistently broken test is reported as failing exactly once.
+Only the final attempt of each test is recorded in the results, so a test that passes on retry is reported as passing and a persistently broken test is reported as failing.
 Retries are visible in the output, so flakiness is surfaced rather than hidden:
 
 ```
-Retrying 2 failed test(s) on a fresh worker...
-  gpu/memory passed on retry
-  broken_test failed again
+Retrying 1 failed test  (1)
+fails      (8) │     0.05 │   failed at 2026-08-08T15:10:15.526
 ```
 
 !!! note
@@ -353,4 +351,4 @@ function jltest {
 
 1. **Use `serial` for resource-intensive tests**: If a test allocates significant memory or uses exclusive hardware resources, mark it as serial rather than reducing `--jobs` globally. This keeps the rest of your suite running in parallel.
 
-1. **Don't paper over real failures with `retries`**: Retries are meant for failures caused by contention between concurrent workers, not for tests that are genuinely broken. Persistent failures still fail after their retries, and retried tests are reported as such, so keep an eye on which tests keep needing a second attempt.
+1. **Only use `retries` for worker contention-related failures**: Not all intermittent failures are caused by parallel worker resource contention. Ensure you aren't masking real test failures when using this feature.

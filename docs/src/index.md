@@ -117,10 +117,11 @@ See [Serial Tests](@ref) in the advanced usage guide for details.
 ### Failure Recycling and Retries
 
 Workers are recycled when they crash or exceed the memory threshold.
-Additionally, `recycle_on_failure=true` recycles a worker after any failed test, so a test
-that corrupts process-wide state cannot poison later tests, and `retries=N` re-runs failed
-tests on an otherwise-idle system, to tell tests broken by resource contention apart from
-genuinely broken ones.
+Additionally, [`runtests`](@ref) has two keyword arguments to further customize
+failure hanlding. Setting `recycle_on_failure=true` recycles a worker after any
+failed test, so a test that corrupts process-wide state cannot poison later tests,
+and `retries=N` re-runs failed tests sequentially up to `N` times to reduce false
+failures caused by resource contention.
 See [Failure Handling](@ref) in the advanced usage guide for details.
 
 ### Real-time Progress
