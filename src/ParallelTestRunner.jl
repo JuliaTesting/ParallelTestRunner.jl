@@ -1349,9 +1349,9 @@ function _runtests(mod::Module, args::ParsedArgs;
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
     interrupted = false
-    # After parallel-before-serial: stop extra workers so only one process is alive for
-    # serial tests, but keep one parallel worker so we do not add a third addworker (ID_COUNTER).
-    function drain_pool_leaving_one_worker!(pool, njobs)
+    # Stop every all-but-`n` workers in the pool.Only safe at a
+    # phase boundary, where all `njobs` slots have been returned.
+    function drain_pool_leaving_n_workers!(pool, njobs, n)
         alive = PTRWorker[]
         for _ in 1:njobs
             p = take!(pool)
@@ -1359,18 +1359,17 @@ function _runtests(mod::Module, args::ParsedArgs;
                 push!(alive, p)
             end
         end
-        while length(alive) > 1
+        while length(alive) > n
             Malt.stop(pop!(alive))
         end
-        kept = isempty(alive) ? nothing : alive[1]
-        if kept !== nothing
-            put!(pool, kept)
+        for p in alive
+            put!(pool, p)
         end
-        for _ in 1:(njobs - (kept === nothing ? 0 : 1))
+        for _ in 1:(njobs - length(alive))
             put!(pool, nothing)
         end
     end
-    function run_test_phase(phase_tests, sem, shared_worker)
+    function run_test_phase(phase_tests, sem, shared_worker; force_recycle::Bool=false)
         # for serial phases, reserve one pool slot for the shared worker
         if !isnothing(shared_worker)
             shared_worker[] = take!(worker_pool)
@@ -1446,7 +1445,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                                   # the worker has reached the max-rss limit, recycle it
                                   # so future tests start with a smaller working set
                                   Malt.stop(wrkr)
-                              elseif recycle_on_failure && anynonpass(result[])
+                              elseif (recycle_on_failure || force_recycle) && anynonpass(result[])
                                   # a failing test may have left the worker in a bad state
                                   # (e.g. a wedged GPU driver whose every later allocation
                                   # fails); recycle it so future tests get a fresh process
@@ -1512,11 +1511,12 @@ function _runtests(mod::Module, args::ParsedArgs;
             run_test_phase(phase_tests, sem, shared_worker)
 
             # parallel workers are not stopped while serial tests remain (tests_to_start > 0);
-            # drain before serial-after so only one worker is alive for the serial phase
+            # drain before serial-after so only one worker is alive for the serial phase.
+            # one is kept rather than none so we do not add a third addworker (ID_COUNTER).
             if isnothing(shared_worker) && i < length(phases)
                 next_tests, _, next_sw = phases[i+1]
                 if !isempty(next_tests) && !isnothing(next_sw)
-                    drain_pool_leaving_one_worker!(worker_pool, jobs)
+                    drain_pool_leaving_n_workers!(worker_pool, jobs, 1)
                 end
             end
         end
@@ -1534,7 +1534,13 @@ function _runtests(mod::Module, args::ParsedArgs;
                 shared_worker = serial_worker
                 filter!(r -> r.test ∉ retry_tests, results.value)
 
-                run_test_phase(retry_tests, sem, shared_worker)
+                # retries run on an otherwise-idle system: stop every worker left over
+                # from the previous phase, so the retry worker is spawned fresh below and
+                # no sibling process competes with it. `force_recycle` keeps it that way
+                # after each test that does not pass.
+                drain_pool_leaving_n_workers!(worker_pool, jobs, 0)
+
+                run_test_phase(retry_tests, sem, shared_worker; force_recycle=true)
             end
         end
     catch err

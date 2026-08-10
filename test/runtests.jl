@@ -1576,7 +1576,13 @@ end
         @test contains(str, r"always_fails +\| +1 +1 ")
     end
 
-    @testset "retried test runs alone" begin
+    # `serial_position=:after` returns the live serial worker to the pool immediately
+    # before the retry phase, so it is the configuration where the "alone" invariant is
+    # easiest to break.
+    @testset "retried test runs alone (serial=$serial, $serial_position)" for
+            (serial, serial_position) in ((String[], :before),
+                                          (["pass3"], :before),
+                                          (["pass3"], :after))
         mktempdir() do dir
             # On its retry, the flaky test checks it is the only worker left alive.
             check_alone = quote
@@ -1597,6 +1603,8 @@ end
                 testsuite,
                 tests=["flaky", "pass1", "pass2", "pass3"],
                 init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
+                serial,
+                serial_position,
                 stdout=io,
                 stderr=io,
                 retries=1,
@@ -1605,6 +1613,31 @@ end
             @test length(collect(eachmatch(r"failed", str))) == 2
             @test contains(str, "SUCCESS")
         end
+    end
+
+    @testset "failing retry does not reuse its worker" begin
+        testsuite = Dict(
+            "failA" => :( @test false ),
+            "failB" => :( @test false ),
+        )
+        io = IOBuffer()
+        @test_throws Test.FallbackTestSetException begin
+            ParallelTestRunner._runtests(
+                ParallelTestRunner, parse_args(["--jobs=1"]);
+                testsuite,
+                tests=["failA", "failB"],
+                stdout=io,
+                stderr=io,
+                retries=1,
+            )
+        end
+        str = String(take!(io))
+        main, retry = split(str, "Retrying")
+        ids(s) = [m[1] for m in eachmatch(r"fail[AB] +\((\d+)\)", s)]
+        # the main run reuses one worker: `recycle_on_failure` is off by default
+        @test length(ids(main)) == 2 && allequal(ids(main))
+        # the retry round recycles after every non-pass, so each test gets its own worker
+        @test length(ids(retry)) == 2 && allunique(ids(retry))
     end
 
     @testset "no retries by default" begin
