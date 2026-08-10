@@ -1348,7 +1348,6 @@ function _runtests(mod::Module, args::ParsedArgs;
     #
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
-    interrupted = false
     # Stop every all-but-`n` workers in the pool.Only safe at a
     # phase boundary, where all `njobs` slots have been returned.
     function drain_pool_leaving_n_workers!(pool, njobs, n)
@@ -1369,7 +1368,9 @@ function _runtests(mod::Module, args::ParsedArgs;
             put!(pool, nothing)
         end
     end
-    function run_test_phase(phase_tests, sem, shared_worker; force_recycle::Bool=false)
+    # `retry_mode` forces worker recycling after every test and enables
+    # deletion of an old failed run of the test that just finished
+    function run_test_phase(phase_tests, sem, shared_worker; retry_mode::Bool=false)
         # for serial phases, reserve one pool slot for the shared worker
         if !isnothing(shared_worker)
             shared_worker[] = take!(worker_pool)
@@ -1431,7 +1432,13 @@ function _runtests(mod::Module, args::ParsedArgs;
                           end
                           test_t1 = time()
                           output = @lock wrkr.io String(take!(wrkr.io[]))
-                          @lock results push!(results[], (; test, result, output, test_t0, test_t1))
+                          # a retry drops the record of the attempt it re-runs only once it
+                          # has one to put in its place: dropping them up front would lose
+                          # them outright if the phase is interrupted
+                          @lock results begin
+                              retry_mode && filter!(r -> r.test != test, results[])
+                              push!(results[], (; test, result, output, test_t0, test_t1))
+                          end
 
                           # act on the results
                           if result isa AbstractTestRecord
@@ -1445,7 +1452,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                                   # the worker has reached the max-rss limit, recycle it
                                   # so future tests start with a smaller working set
                                   Malt.stop(wrkr)
-                              elseif (recycle_on_failure || force_recycle) && anynonpass(result[])
+                              elseif (recycle_on_failure || retry_mode) && anynonpass(result[])
                                   # a failing test may have left the worker in a bad state
                                   # (e.g. a wedged GPU driver whose every later allocation
                                   # fails); recycle it so future tests get a fresh process
@@ -1501,7 +1508,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     try
         phases = test_phases
 
-        potential_retries = retries > 0 && !interrupted && args.quickfail === nothing
+        potential_retries = retries > 0 && args.quickfail === nothing
 
         potential_retries && (io_ctx.nonpass_face[] = :ptr_warn)
         for i in 1:length(phases)
@@ -1524,6 +1531,11 @@ function _runtests(mod::Module, args::ParsedArgs;
         # retries
         if potential_retries
             for i in 1:retries
+                # `stop_work()` may have been called from a worker task or the printer
+                # without any exception reaching the `catch` below, so we cannot assume we
+                # got here normally; there is no point retrying a run being torn down.
+                done[] && break
+
                 retries == i && (io_ctx.nonpass_face[] = :ptr_error)
                 retry_tests = [r.test for r in results.value
                                     if r.result isa Exception || anynonpass(r.result[])]
@@ -1532,19 +1544,17 @@ function _runtests(mod::Module, args::ParsedArgs;
                 put!(printer_channel, (:retry, length(retry_tests), i))
                 sem = Base.Semaphore(1)
                 shared_worker = serial_worker
-                filter!(r -> r.test ∉ retry_tests, results.value)
 
                 # retries run on an otherwise-idle system: stop every worker left over
                 # from the previous phase, so the retry worker is spawned fresh below and
-                # no sibling process competes with it. `force_recycle` keeps it that way
+                # no sibling process competes with it. `retry_mode` keeps it that way
                 # after each test that does not pass.
                 drain_pool_leaving_n_workers!(worker_pool, jobs, 0)
 
-                run_test_phase(retry_tests, sem, shared_worker; force_recycle=true)
+                run_test_phase(retry_tests, sem, shared_worker; retry_mode=true)
             end
         end
     catch err
-        interrupted = true
         if !(err isa InterruptException)
             println(io_ctx.stderr, "\nCaught an error, stopping...")
         end
