@@ -1263,6 +1263,8 @@ function _runtests(mod::Module, args::ParsedArgs;
     # (:started, test_name, worker_id)
     # (:finished, test_name, worker_id, record)
     # (:crashed, test_name, worker_id, test_time)
+    # (:retry, tests_n, retry_n)
+    # (:nonpass_color, color)
     printer_channel = Channel{Tuple}(100)
 
     printer_task = @async begin
@@ -1312,6 +1314,12 @@ function _runtests(mod::Module, args::ParsedArgs;
                         finally
                             unlock(io_ctx.lock)
                         end
+
+                    elseif msg_type === :nonpass_face
+                        # routed through the channel rather than set directly so it lands
+                        # in order with the results it applies to: the coordinator flips it
+                        # while this task may still be draining the previous round
+                        io_ctx.nonpass_face[] = msg[2]
                     end
                 end
 
@@ -1510,7 +1518,7 @@ function _runtests(mod::Module, args::ParsedArgs;
 
         potential_retries = retries > 0 && args.quickfail === nothing
 
-        potential_retries && (io_ctx.nonpass_face[] = :ptr_warn)
+        potential_retries && put!(printer_channel, (:nonpass_face, :ptr_warn))
         for i in 1:length(phases)
             phase_tests, sem, shared_worker = phases[i]
             isempty(phase_tests) && continue
@@ -1536,11 +1544,12 @@ function _runtests(mod::Module, args::ParsedArgs;
                 # got here normally; there is no point retrying a run being torn down.
                 done[] && break
 
-                retries == i && (io_ctx.nonpass_face[] = :ptr_error)
                 retry_tests = [r.test for r in results.value
                                     if r.result isa Exception || anynonpass(r.result[])]
                 isempty(retry_tests) && break
 
+                # the last attempt of a test is the one that gets reported, so print it red
+                retries == i && put!(printer_channel, (:nonpass_face, :ptr_error))
                 put!(printer_channel, (:retry, length(retry_tests), i))
                 sem = Base.Semaphore(1)
                 shared_worker = serial_worker
