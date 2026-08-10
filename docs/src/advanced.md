@@ -212,6 +212,10 @@ Retrying 1 failed test  (1)
 fails      (8) │     0.05 │   failed at 2026-08-08T15:10:15.526
 ```
 
+While a test still has an attempt left, its failure is printed in yellow, and the final
+attempt is printed in red. A red line therefore always marks the result that will be reported,
+and a yellow one marks a result that may still be replaced.
+
 !!! note
     Retries are skipped when the run was interrupted (e.g. `Ctrl+C`) or when `--quickfail` is
     in effect, since in both cases the run stopped early on purpose.
