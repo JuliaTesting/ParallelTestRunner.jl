@@ -187,10 +187,10 @@ function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lo
 end
 
 # faces used in printing
-const ptr_default = :white
+const ptr_default = :default
 const ptr_warn = :yellow
 const ptr_error = :red
-const ptr_light = :bright_black
+const ptr_light = :light
 
 function print_header(::Type{<:AbstractTestRecord}, ctx::TestIOContext, testgroupheader, workerheader)
     lock(ctx.lock)
