@@ -1113,11 +1113,7 @@ function _runtests(mod::Module, args::ParsedArgs;
         println(stdout, "  $(length(serial_tests)) serial test(s) will run $(serial_position) the parallel batch.")
     end
     if !isnothing(args.verbose)
-        print(stdout, "Available memory: ")
-        printstyled(stdout, Base.format_bytes(available_memory()); bold=true)
-        print(stdout, "; Max worker RSS: ")
-        printstyled(stdout, Base.format_bytes(max_worker_rss); bold=true)
-        println(stdout)
+        println(stdout, styled"Available memory: {bold:$(Base.format_bytes(available_memory()))}; Max worker RSS: {bold:$(Base.format_bytes(max_worker_rss))}")
     end
 
     t0 = time()
@@ -1527,13 +1523,12 @@ function _runtests(mod::Module, args::ParsedArgs;
     # (`@sync` above joined all writers, so `results` is quiescent from here on)
     for (testname, result, output, _start, _stop) in results.value
         if !isempty(output)
-            print(io_ctx.stdout, "\nOutput generated during execution of '")
-            if result isa Exception || anynonpass(result[])
-                printstyled(io_ctx.stdout, testname; color=:red)
+            testface = if result isa Exception || anynonpass(result[])
+                ptr_error
             else
-                printstyled(io_ctx.stdout, testname; color=:normal)
+                ptr_default
             end
-            println(io_ctx.stdout, "':")
+            println(io_ctx.stdout, styled"\nOutput generated during execution of '{$testface:$testname}':")
             lines = collect(eachline(IOBuffer(output)))
 
             for (i,line) in enumerate(lines)
@@ -1646,9 +1641,9 @@ function _runtests(mod::Module, args::ParsedArgs;
         print(io_ctx.stdout, c.output)
     end
     if !anynonpass(o_ts)
-        printstyled(io_ctx.stdout, "    SUCCESS\n"; bold=true, color=:green)
+        print(io_ctx.stdout, styled"    {green,bold:SUCCESS}\n")
     else
-        printstyled(io_ctx.stderr, "    FAILURE\n\n"; bold=true, color=:red)
+        print(io_ctx.stderr, styled"    {ptr_error,bold:FAILURE}\n\n")
         if VERSION >= v"1.13.0-DEV.1033"
             Test.print_test_errors(io_ctx.stdout, o_ts)
         else
