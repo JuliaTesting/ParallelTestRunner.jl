@@ -239,8 +239,8 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
 
             # compilation time
             if VERSION >= v"1.11"
-                init_time_str = @sprintf("%7.2f", Float64(100*base.compile_time/base.time))
-                printstyled(ctx.stdout, lpad(init_time_str, ctx.compile_align, " "), " │ ", color = :white)
+                comp_time_str = @sprintf("%7.2f", Float64(100*base.compile_time/base.time))
+                printstyled(ctx.stdout, lpad(comp_time_str, ctx.compile_align, " "), " │ ", color = :white)
             end
         end
 
