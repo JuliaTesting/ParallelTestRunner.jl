@@ -186,6 +186,12 @@ function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lo
     )
 end
 
+# faces used in printing
+const ptr_default = :white
+const ptr_warn = :yellow
+const ptr_error = :red
+const ptr_light = :bright_black
+
 function print_header(::Type{<:AbstractTestRecord}, ctx::TestIOContext, testgroupheader, workerheader)
     lock(ctx.lock)
     try
@@ -193,14 +199,14 @@ function print_header(::Type{<:AbstractTestRecord}, ctx::TestIOContext, testgrou
         name_pad_str = " "^(ctx.name_align + textwidth(testgroupheader) - 3) * " │ "
         init_str = ctx.verbose ? "   Init   │" : ""
         compile_str = VERSION >= v"1.11" && ctx.verbose ? " Compile │" : ""
-        header_top_str = styled"{white:$name_pad_str  Test   │$init_str$compile_str ──────────────── CPU ──────────────── │}\n"
+        header_top_str = styled"{$ptr_default:$name_pad_str  Test   │$init_str$compile_str ──────────────── CPU ──────────────── │}\n"
         print(ctx.stdout, header_top_str)
 
         # header bottom
         workerheaderstr = lpad(workerheader, ctx.name_align - textwidth(testgroupheader) + 1)
         init_time_str = ctx.verbose ? " time (s) │" : ""
         comp_time_str = VERSION >= v"1.11" && ctx.verbose ? "   (%)   │" : ""
-        bottom_header_str = styled"{white:$testgroupheader$workerheaderstr │ time (s) │$init_time_str$comp_time_str GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │}\n"
+        bottom_header_str = styled"{$ptr_default:$testgroupheader$workerheaderstr │ time (s) │$init_time_str$comp_time_str GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │}\n"
         print(ctx.stdout, bottom_header_str)
         flush(ctx.stdout)
     finally
@@ -212,7 +218,7 @@ function print_test_started(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        out_str = styled"{white:$(test)$padded_wrkr │}{bright_black:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
+        out_str = styled"{$ptr_default:$(test)$padded_wrkr │}{$ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -256,11 +262,11 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
         padded_alloc = lpad(alloc_str, ctx.alloc_align, " ")
 
         mem_use = memory_usage(record)
-        mem_face = mem_use > ctx.max_worker_rss ? :yellow : :white
+        mem_face = mem_use > ctx.max_worker_rss ? ptr_warn : ptr_default
         rss_str = @sprintf("%5.2f", mem_use / 2^20)
         padded_rss = lpad(rss_str, ctx.rss_align, " ")
 
-        out_str = styled"{white:$test$padded_wrkr │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n}"
+        out_str = styled"{$ptr_default:$test$padded_wrkr │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n}"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -291,7 +297,7 @@ function print_test_failed(record::AbstractTestRecord, wrkr, test, ctx::TestIOCo
 
         # TODO: print other stats?
 
-        out_str = styled"{red:$test$padded_wrkr │$padded_time │$padded_init_time$failed_str}\n"
+        out_str = styled"{$ptr_error:$test$padded_wrkr │$padded_time │$padded_init_time$failed_str}\n"
         print(ctx.stderr, out_str)
         flush(ctx.stderr)
     finally
@@ -303,7 +309,7 @@ function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        out_str = styled"{red:$(test)$padded_wrkr │$(\" \"^ctx.elapsed_align) crashed at $(now())}\n"
+        out_str = styled"{$ptr_error:$(test)$padded_wrkr │$(\" \"^ctx.elapsed_align) crashed at $(now())}\n"
         print(ctx.stderr, out_str)
         flush(ctx.stderr)
     finally
