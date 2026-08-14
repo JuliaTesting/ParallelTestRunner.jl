@@ -27,10 +27,10 @@ using MyPackage
 # Manually define your test suite
 testsuite = Dict(
     "basic" => quote
-        include("basic.jl")
+        include(joinpath(@__DIR__, "basic.jl"))
     end,
     "advanced" => quote
-        include("advanced.jl")
+        include(joinpath(@__DIR__, "advanced.jl"))
         @test 40 + 2 ≈ 42
     end
 )
