@@ -59,11 +59,8 @@ Pkg.test("MyPackage")
 You can pass various options to the `runtests.jl` script to control test execution:
 
 ```bash
-julia --project runtests.jl [OPTIONS] [TESTS...]
+julia --project test/runtests.jl [OPTIONS] [TESTS...]
 ```
-
-!!! note
-    When using relative paths in `runtests.jl`, remember to run the script in the correct directory.
 
 ### Available Options
 
