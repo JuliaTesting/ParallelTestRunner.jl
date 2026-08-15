@@ -27,10 +27,10 @@ using MyPackage
 # Manually define your test suite
 testsuite = Dict(
     "basic" => quote
-        include("basic.jl")
+        include(joinpath(@__DIR__, "basic.jl"))
     end,
     "advanced" => quote
-        include("advanced.jl")
+        include(joinpath(@__DIR__, "advanced.jl"))
         @test 40 + 2 ≈ 42
     end
 )
@@ -51,7 +51,7 @@ using MyPackage
 
 # Start with autodiscovered tests
 cd(test_dir) do # hide
-testsuite = find_tests(pwd())
+testsuite = find_tests(@__DIR__)
 
 # Parse arguments
 args = parse_args(ARGS)
@@ -291,7 +291,7 @@ function jltest {
 1. **Handle platform differences**: Use conditional logic in your test suite setup to handle platform-specific tests:
 
    ```julia
-   testsuite = find_tests(pwd())
+   testsuite = find_tests(@__DIR__)
    if Sys.iswindows()
        delete!(testsuite, "unix_specific_test")
    end

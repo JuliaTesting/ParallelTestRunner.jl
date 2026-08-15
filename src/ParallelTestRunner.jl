@@ -977,7 +977,7 @@ Customize the test suite
 using ParallelTestRunner
 using MyPackage
 
-testsuite = find_tests(pwd())
+testsuite = find_tests(@__DIR__)
 args = parse_args(ARGS)
 if filter_tests!(testsuite, args)
     # Remove a specific test
