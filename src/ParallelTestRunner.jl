@@ -1264,7 +1264,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     # (:finished, test_name, worker_id, record)
     # (:crashed, test_name, worker_id, test_time)
     # (:retry, tests_n, retry_n)
-    # (:nonpass_color, color)
+    # (:nonpass_face, face)
     printer_channel = Channel{Tuple}(100)
 
     printer_task = @async begin
