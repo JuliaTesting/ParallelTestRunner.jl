@@ -1519,9 +1519,9 @@ function _runtests(mod::Module, args::ParsedArgs;
     for (testname, result, output, _start, _stop) in results.value
         if !isempty(output)
             testface = if result isa Exception || anynonpass(result[])
-                ptr_error
+                :ptr_error
             else
-                ptr_default
+                :ptr_default
             end
             println(io_ctx.stdout, styled"\nOutput generated during execution of '{$testface:$testname}':")
             lines = collect(eachline(IOBuffer(output)))
