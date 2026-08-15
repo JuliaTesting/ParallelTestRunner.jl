@@ -346,6 +346,30 @@ end
     @test contains(str, "1 == 2")
 end
 
+@testset "failed test row printed entirely to stderr" begin
+    testsuite = Dict(
+        "failing test" => quote
+            @test 1 == 2
+        end
+    )
+
+    # use separate streams: the whole row of a failed test must go to stderr
+    out = IOBuffer()
+    err = IOBuffer()
+    @test_throws Test.FallbackTestSetException("Test run finished with errors") begin
+        runtests(ParallelTestRunner, ["--verbose"]; testsuite, stdout=out, stderr=err)
+    end
+
+    outs = String(take!(out))
+    errs = String(take!(err))
+    m = match(r"failing test[^\n]*failed at", errs)
+    @test m !== nothing
+    # in verbose mode the row has three cell separators (time, init time) on
+    # stderr; the init-time cell used to leak to stdout instead
+    @test m !== nothing && count("│", m.match) == 3
+    @test !contains(outs, "failed at")
+end
+
 @testset "nested failure" begin
     testsuite = Dict(
         "nested" => quote
@@ -882,6 +906,26 @@ end
 
     exe = ParallelTestRunner.test_exe(true)
     @test any(contains("--color=yes"), exe.exec)
+end
+
+@testset "truncate_line" begin
+    # short lines are untouched
+    @test ParallelTestRunner.truncate_line("short", 80) == "short"
+    @test ParallelTestRunner.truncate_line("x"^80, 80) == "x"^80
+
+    truncated = ParallelTestRunner.truncate_line("x"^100, 80)
+    @test length(truncated) == 80
+    @test endswith(truncated, "...")
+
+    # multi-byte characters must not break the cut: with byte indexing these
+    # would throw a StringIndexError when the cut lands mid-character
+    truncated = ParallelTestRunner.truncate_line("t" * "α"^100, 80)
+    @test length(truncated) == 80
+    @test endswith(truncated, "...")
+
+    truncated = ParallelTestRunner.truncate_line("€"^100, 40)
+    @test length(truncated) == 40
+    @test endswith(truncated, "...")
 end
 
 @testset "TestHistoryEntry" begin
