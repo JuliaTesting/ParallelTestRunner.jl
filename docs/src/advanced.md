@@ -291,7 +291,7 @@ function jltest {
 1. **Handle platform differences**: Use conditional logic in your test suite setup to handle platform-specific tests:
 
    ```julia
-   testsuite = find_tests(pwd())
+   testsuite = find_tests(@__DIR__)
    if Sys.iswindows()
        delete!(testsuite, "unix_specific_test")
    end
