@@ -13,6 +13,7 @@ import Test
 import Random
 import IOCapture
 using Test: DefaultTestSet
+using StyledStrings: Face, @styled_str, addface!
 
 function anynonpass(ts::Test.AbstractTestSet)
     @static if VERSION >= v"1.13.0-DEV.1037"
@@ -185,23 +186,23 @@ function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lo
     )
 end
 
+
 function print_header(::Type{<:AbstractTestRecord}, ctx::TestIOContext, testgroupheader, workerheader)
     lock(ctx.lock)
     try
         # header top
-        printstyled(ctx.stdout, " "^(ctx.name_align + textwidth(testgroupheader) - 3), " │ ", color = :white)
-        printstyled(ctx.stdout, "  Test   │", color = :white)
-        ctx.verbose && printstyled(ctx.stdout, "   Init   │", color = :white)
-        VERSION >= v"1.11" && ctx.verbose && printstyled(ctx.stdout, " Compile │", color = :white)
-        printstyled(ctx.stdout, " ──────────────── CPU ──────────────── │\n", color = :white)
+        name_pad_str = " "^(ctx.name_align + textwidth(testgroupheader) - 3) * " │ "
+        init_str = ctx.verbose ? "   Init   │" : ""
+        compile_str = VERSION >= v"1.11" && ctx.verbose ? " Compile │" : ""
+        header_top_str = styled"{ptr_default:$name_pad_str  Test   │$init_str$compile_str ──────────────── CPU ──────────────── │}\n"
+        print(ctx.stdout, header_top_str)
 
         # header bottom
-        printstyled(ctx.stdout, testgroupheader, color = :white)
-        printstyled(ctx.stdout, lpad(workerheader, ctx.name_align - textwidth(testgroupheader) + 1), " │ ", color = :white)
-        printstyled(ctx.stdout, "time (s) │", color = :white)
-        ctx.verbose && printstyled(ctx.stdout, " time (s) │", color = :white)
-        VERSION >= v"1.11" && ctx.verbose && printstyled(ctx.stdout, "   (%)   │", color = :white)
-        printstyled(ctx.stdout, " GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │\n", color = :white)
+        workerheaderstr = lpad(workerheader, ctx.name_align - textwidth(testgroupheader) + 1)
+        init_time_str = ctx.verbose ? " time (s) │" : ""
+        comp_time_str = VERSION >= v"1.11" && ctx.verbose ? "   (%)   │" : ""
+        bottom_header_str = styled"{ptr_default:$testgroupheader$workerheaderstr │ time (s) │$init_time_str$comp_time_str GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │}\n"
+        print(ctx.stdout, bottom_header_str)
         flush(ctx.stdout)
     finally
         unlock(ctx.lock)
@@ -211,11 +212,9 @@ end
 function print_test_started(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
-        printstyled(ctx.stdout, test, lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │", color = :white)
-        printstyled(
-            ctx.stdout,
-            " "^ctx.elapsed_align, "started at $(now())\n", color = :light_black
-        )
+        padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
+        out_str = styled"{ptr_default:$(test)$padded_wrkr │}{ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
+        print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
         unlock(ctx.lock)
@@ -226,38 +225,44 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
     base = parent(record)
     lock(ctx.lock)
     try
-        printstyled(ctx.stdout, test, color = :white)
-        printstyled(ctx.stdout, lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │ ", color = :white)
+        padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
 
         time_str = @sprintf("%7.2f", base.time)
-        printstyled(ctx.stdout, lpad(time_str, ctx.elapsed_align, " "), " │ ", color = :white)
+        padded_time = lpad(time_str, ctx.elapsed_align, " ")
 
-        if ctx.verbose
+        padded_init_time, padded_comp_time = if ctx.verbose
             # pre-testset time
             init_time_str = @sprintf("%7.2f", base.total_time - base.time)
-            printstyled(ctx.stdout, lpad(init_time_str, ctx.elapsed_align, " "), " │ ", color = :white)
+            init_time = lpad(init_time_str, ctx.elapsed_align, " ") * " │ "
 
             # compilation time
-            if VERSION >= v"1.11"
-                init_time_str = @sprintf("%7.2f", Float64(100*base.compile_time/base.time))
-                printstyled(ctx.stdout, lpad(init_time_str, ctx.compile_align, " "), " │ ", color = :white)
+            comp_time = if VERSION >= v"1.11"
+                comp_time_str = @sprintf("%7.2f", Float64(100*base.compile_time/base.time))
+                lpad(comp_time_str, ctx.compile_align, " ") * " │ "
+            else
+                ""
             end
+            init_time, comp_time
+        else
+            "", ""
         end
 
         gc_str = @sprintf("%5.2f", base.gctime)
-        printstyled(ctx.stdout, lpad(gc_str, ctx.gc_align, " "), " │ ", color = :white)
+        padded_gc = lpad(gc_str, ctx.gc_align, " ")
+
         percent_str = @sprintf("%4.1f", 100 * base.gctime / base.time)
-        printstyled(ctx.stdout, lpad(percent_str, ctx.percent_align, " "), " │ ", color = :white)
+        padded_percent = lpad(percent_str, ctx.percent_align, " ")
+
         alloc_str = @sprintf("%5.2f", base.bytes / 2^20)
-        printstyled(ctx.stdout, lpad(alloc_str, ctx.alloc_align, " "), " │ ", color = :white)
+        padded_alloc = lpad(alloc_str, ctx.alloc_align, " ")
 
         mem_use = memory_usage(record)
-        mem_color = mem_use > ctx.max_worker_rss ? :yellow : :white
+        mem_face = mem_use > ctx.max_worker_rss ? :ptr_warn : :ptr_default
         rss_str = @sprintf("%5.2f", mem_use / 2^20)
-        printstyled(ctx.stdout, lpad(rss_str, ctx.rss_align, " "), color = mem_color)
+        padded_rss = lpad(rss_str, ctx.rss_align, " ")
 
-        printstyled(ctx.stdout, " │\n", color = :white)
-
+        out_str = styled"{ptr_default:$test$padded_wrkr │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n}"
+        print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
         unlock(ctx.lock)
@@ -268,29 +273,27 @@ function print_test_failed(record::AbstractTestRecord, wrkr, test, ctx::TestIOCo
     base = parent(record)
     lock(ctx.lock)
     try
-        printstyled(ctx.stderr, test, color = :red)
-        printstyled(
-            ctx.stderr,
-            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │"
-            , color = :red
-        )
+        padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
 
         time_str = @sprintf("%7.2f", base.time)
-        printstyled(ctx.stderr, lpad(time_str, ctx.elapsed_align + 1, " "), " │", color = :red)
+        padded_time = lpad(time_str, ctx.elapsed_align + 1, " ")
 
-        if ctx.verbose
+        padded_init_time = if ctx.verbose
             init_time_str = @sprintf("%7.2f", base.total_time - base.time)
-            printstyled(ctx.stderr, lpad(init_time_str, ctx.elapsed_align + 1, " "), " │ ", color = :red)
+            lpad(init_time_str, ctx.elapsed_align + 1, " ") * " │ "
+        else
+            ""
         end
 
-        failed_str = "failed at $(now())\n"
+        failed_str = "failed at $(now())"
         # 11 -> 3 from " │ " 3x and 2 for each " " on either side
         fail_align = (11 + ctx.gc_align + ctx.percent_align + ctx.alloc_align + ctx.rss_align - textwidth(failed_str)) ÷ 2 + textwidth(failed_str)
         failed_str = lpad(failed_str, fail_align, " ")
-        printstyled(ctx.stderr, failed_str, color = :red)
 
         # TODO: print other stats?
 
+        out_str = styled"{ptr_error:$test$padded_wrkr │$padded_time │$padded_init_time$failed_str}\n"
+        print(ctx.stderr, out_str)
         flush(ctx.stderr)
     finally
         unlock(ctx.lock)
@@ -300,13 +303,9 @@ end
 function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestIOContext)
     lock(ctx.lock)
     try
-        printstyled(ctx.stderr, test, color = :red)
-        printstyled(
-            ctx.stderr,
-            lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " "), " │",
-            " "^ctx.elapsed_align, " crashed at $(now())\n", color = :red
-        )
-
+        padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
+        out_str = styled"{ptr_error:$(test)$padded_wrkr │$(\" \"^ctx.elapsed_align) crashed at $(now())}\n"
+        print(ctx.stderr, out_str)
         flush(ctx.stderr)
     finally
         unlock(ctx.lock)
@@ -1109,11 +1108,7 @@ function _runtests(mod::Module, args::ParsedArgs;
         println(stdout, "  $(length(serial_tests)) serial test(s) will run $(serial_position) the parallel batch.")
     end
     if !isnothing(args.verbose)
-        print(stdout, "Available memory: ")
-        printstyled(stdout, Base.format_bytes(available_memory()); bold=true)
-        print(stdout, "; Max worker RSS: ")
-        printstyled(stdout, Base.format_bytes(max_worker_rss); bold=true)
-        println(stdout)
+        println(stdout, styled"Available memory: {bold:$(Base.format_bytes(available_memory()))}; Max worker RSS: {bold:$(Base.format_bytes(max_worker_rss))}")
     end
 
     t0 = time()
@@ -1523,13 +1518,12 @@ function _runtests(mod::Module, args::ParsedArgs;
     # (`@sync` above joined all writers, so `results` is quiescent from here on)
     for (testname, result, output, _start, _stop) in results.value
         if !isempty(output)
-            print(io_ctx.stdout, "\nOutput generated during execution of '")
-            if result isa Exception || anynonpass(result[])
-                printstyled(io_ctx.stdout, testname; color=:red)
+            testface = if result isa Exception || anynonpass(result[])
+                :ptr_error
             else
-                printstyled(io_ctx.stdout, testname; color=:normal)
+                :ptr_default
             end
-            println(io_ctx.stdout, "':")
+            println(io_ctx.stdout, styled"\nOutput generated during execution of '{$testface:$testname}':")
             lines = collect(eachline(IOBuffer(output)))
 
             for (i,line) in enumerate(lines)
@@ -1642,9 +1636,9 @@ function _runtests(mod::Module, args::ParsedArgs;
         print(io_ctx.stdout, c.output)
     end
     if !anynonpass(o_ts)
-        printstyled(io_ctx.stdout, "    SUCCESS\n"; bold=true, color=:green)
+        print(io_ctx.stdout, styled"    {green,bold:SUCCESS}\n")
     else
-        printstyled(io_ctx.stderr, "    FAILURE\n\n"; bold=true, color=:red)
+        print(io_ctx.stderr, styled"    {ptr_error,bold:FAILURE}\n\n")
         if VERSION >= v"1.13.0-DEV.1033"
             Test.print_test_errors(io_ctx.stdout, o_ts)
         else
@@ -1660,5 +1654,13 @@ function _runtests(mod::Module, args::ParsedArgs;
 end
 
 runtests(mod::Module, ARGS::Array{String}; kwargs...) = runtests(mod, parse_args(ARGS); kwargs...)
+
+# register faces used in printing
+function __init__()
+    addface!(:ptr_default => Face(inherit=:default))
+    addface!(:ptr_warn => Face(inherit=:yellow))
+    addface!(:ptr_error => Face(inherit=:red))
+    addface!(:ptr_light => Face(inherit=:light))
+end
 
 end
