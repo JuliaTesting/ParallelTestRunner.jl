@@ -114,6 +114,16 @@ The `serial` keyword argument to [`runtests`](@ref) lets you designate specific 
 for sequential execution, either before or after the parallel batch.
 See [Serial Tests](@ref) in the advanced usage guide for details.
 
+### Failure Recycling and Retries
+
+Workers are recycled when they crash or exceed the memory threshold.
+Additionally, [`runtests`](@ref) has two keyword arguments to further customize
+failure hanlding. Setting `recycle_on_failure=true` recycles a worker after any
+failed test, so a test that corrupts process-wide state cannot poison later tests,
+and `retries=N` re-runs failed tests sequentially up to `N` times to reduce false
+failures caused by resource contention.
+See [Failure Handling](@ref) in the advanced usage guide for details.
+
 ### Real-time Progress
 
 The test runner provides real-time output showing:
