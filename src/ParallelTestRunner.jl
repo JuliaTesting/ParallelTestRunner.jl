@@ -1356,7 +1356,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     #
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
-    # Stop every all-but-`n` workers in the pool.Only safe at a
+    # Stop all but `n` workers in the pool. Only safe at a
     # phase boundary, where all `njobs` slots have been returned.
     function drain_pool_leaving_n_workers!(pool, njobs, n)
         alive = PTRWorker[]
@@ -1376,8 +1376,9 @@ function _runtests(mod::Module, args::ParsedArgs;
             put!(pool, nothing)
         end
     end
-    # `retry_mode` forces worker recycling after every test and enables
-    # deletion of an old failed run of the test that just finished
+    # `retry_mode` forces worker recycling after every non-passing test regardless
+    #  of the value of `recycle_on_failure` and enables deletion of an old failed
+    #  run of the test that just finished
     function run_test_phase(phase_tests, sem, shared_worker; retry_mode::Bool=false)
         # for serial phases, reserve one pool slot for the shared worker
         if !isnothing(shared_worker)
