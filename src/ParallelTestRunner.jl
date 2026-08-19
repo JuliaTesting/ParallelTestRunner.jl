@@ -918,7 +918,7 @@ Several keyword arguments are also supported:
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
 - `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time
-  instead of in parallel. An `ArgumentError` is thrown if any name is not found in the testsuite.
+  instead of in parallel.
 - `serial_position`: When to run serial tests relative to the parallel batch.
   Must be `:before` (default) or `:after`.
 - `recycle_on_failure`: Whether to recycle a worker after any test that did not pass
