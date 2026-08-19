@@ -168,6 +168,7 @@ struct TestIOContext
     alloc_align::Int
     rss_align::Int
     max_worker_rss::Int
+    nonpass_face::Ref{Symbol}
 end
 
 function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lock::ReentrantLock, name_align::Int, verbose::Bool, max_worker_rss::Int)
@@ -182,7 +183,7 @@ function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lo
 
     return TestIOContext(
         stdout, stderr, color, verbose, lock, name_align, elapsed_align, compile_align, gc_align, percent_align,
-        alloc_align, rss_align, max_worker_rss
+        alloc_align, rss_align, max_worker_rss, Ref(:ptr_error)
     )
 end
 
@@ -292,7 +293,7 @@ function print_test_failed(record::AbstractTestRecord, wrkr, test, ctx::TestIOCo
 
         # TODO: print other stats?
 
-        out_str = styled"{ptr_error:$test$padded_wrkr │$padded_time │$padded_init_time$failed_str}\n"
+        out_str = styled"{$(ctx.nonpass_face[]):$test$padded_wrkr │$padded_time │$padded_init_time$failed_str}\n"
         print(ctx.stderr, out_str)
         flush(ctx.stderr)
     finally
@@ -304,7 +305,7 @@ function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        out_str = styled"{ptr_error:$(test)$padded_wrkr │$(\" \"^ctx.elapsed_align) crashed at $(now())}\n"
+        out_str = styled"{$(ctx.nonpass_face[]):$(test)$padded_wrkr │$(\" \"^ctx.elapsed_align) crashed at $(now())}\n"
         print(ctx.stderr, out_str)
         flush(ctx.stderr)
     finally
@@ -871,7 +872,9 @@ end
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss(),
              serial = String[],
-             serial_position::Symbol = :before)
+             serial_position::Symbol = :before,
+             recycle_on_failure::Bool = false,
+             retries::Integer = 0)
     runtests(mod::Module, ARGS; ...)
 
 Run Julia tests in parallel across multiple worker processes.
@@ -919,6 +922,10 @@ Several keyword arguments are also supported:
   testsuite; names that are valid but deselected by command-line filtering are ignored.
 - `serial_position`: When to run serial tests relative to the parallel batch.
   Must be `:before` (default) or `:after`.
+- `recycle_on_failure`: Whether to recycle a worker after any test that did not pass
+  (default: `false`). See the Failure Handling section below.
+- `retries`: How many times to re-run tests that did not pass after the main run completes
+  (default: `0`). See the Failure Handling section below.
 
 ## Command Line Options
 
@@ -998,6 +1005,15 @@ runtests(MyPackage, ARGS; serial=["big_alloc_test", "huge_matrix"])
 
 Workers are automatically recycled when they exceed memory limits to prevent out-of-memory
 issues during long test runs. The memory limit is set based on system architecture.
+
+## Failure Handling
+
+With `recycle_on_failure = true`, a worker is recycled after any test that did not pass, so
+a test that corrupts process-wide state (e.g. wedges a GPU driver) cannot poison subsequent
+tests on the same worker.
+
+With `retries = N` (default 0), tests that did not pass are re-run sequentially up to `N`
+times after the main run completes. Only the final attempt of each test is reported.
 """
 function runtests(mod::Module, args::ParsedArgs;
                   testsuite::Dict{String,Expr} = find_tests(pwd()),
@@ -1012,6 +1028,8 @@ function runtests(mod::Module, args::ParsedArgs;
                   stdout = Base.stdout,
                   stderr = Base.stderr,
                   max_worker_rss = get_max_worker_rss(),
+                  recycle_on_failure::Bool = false,
+                  retries::Integer = 0,
                   )
     #
     # set-up
@@ -1069,6 +1087,8 @@ function runtests(mod::Module, args::ParsedArgs;
         stdout,
         stderr,
         max_worker_rss,
+        recycle_on_failure,
+        retries,
     )
 end
 
@@ -1091,6 +1111,8 @@ function _runtests(mod::Module, args::ParsedArgs;
                    stdout = Base.stdout,
                    stderr = Base.stderr,
                    max_worker_rss = get_max_worker_rss(),
+                   recycle_on_failure::Bool = false,
+                   retries::Integer = 0,
                    )
 
     # partition into serial and parallel groups
@@ -1241,6 +1263,8 @@ function _runtests(mod::Module, args::ParsedArgs;
     # (:started, test_name, worker_id)
     # (:finished, test_name, worker_id, record)
     # (:crashed, test_name, worker_id, test_time)
+    # (:retry, tests_n, retry_n)
+    # (:nonpass_face, face)
     printer_channel = Channel{Tuple}(100)
 
     printer_task = @async begin
@@ -1278,6 +1302,24 @@ function _runtests(mod::Module, args::ParsedArgs;
 
                         clear_status()
                         print_test_crashed(RecordType, wrkr, test_name, io_ctx)
+
+                    elseif msg_type === :retry
+                        tests_n, retry_n = msg[2], msg[3]
+
+                        clear_status()
+                        lock(io_ctx.lock)
+                        try
+                            println(io_ctx.stdout, styled"{ptr_default:Retrying $tests_n failed test$(tests_n > 1 ? \"s\" : \" \") ($retry_n)}")
+                            flush(io_ctx.stdout)
+                        finally
+                            unlock(io_ctx.lock)
+                        end
+
+                    elseif msg_type === :nonpass_face
+                        # routed through the channel rather than set directly so it lands
+                        # in order with the results it applies to: the coordinator flips it
+                        # while this task may still be draining the previous round
+                        io_ctx.nonpass_face[] = msg[2]
                     end
                 end
 
@@ -1314,9 +1356,9 @@ function _runtests(mod::Module, args::ParsedArgs;
     #
 
     tests_to_start = Threads.Atomic{Int}(length(tests))
-    # After parallel-before-serial: stop extra workers so only one process is alive for
-    # serial tests, but keep one parallel worker so we do not add a third addworker (ID_COUNTER).
-    function drain_pool_leaving_one_worker!(pool, njobs)
+    # Stop every all-but-`n` workers in the pool.Only safe at a
+    # phase boundary, where all `njobs` slots have been returned.
+    function drain_pool_leaving_n_workers!(pool, njobs, n)
         alive = PTRWorker[]
         for _ in 1:njobs
             p = take!(pool)
@@ -1324,18 +1366,19 @@ function _runtests(mod::Module, args::ParsedArgs;
                 push!(alive, p)
             end
         end
-        while length(alive) > 1
+        while length(alive) > n
             Malt.stop(pop!(alive))
         end
-        kept = isempty(alive) ? nothing : alive[1]
-        if kept !== nothing
-            put!(pool, kept)
+        for p in alive
+            put!(pool, p)
         end
-        for _ in 1:(njobs - (kept === nothing ? 0 : 1))
+        for _ in 1:(njobs - length(alive))
             put!(pool, nothing)
         end
     end
-    function run_test_phase(phase_tests, sem, shared_worker)
+    # `retry_mode` forces worker recycling after every test and enables
+    # deletion of an old failed run of the test that just finished
+    function run_test_phase(phase_tests, sem, shared_worker; retry_mode::Bool=false)
         # for serial phases, reserve one pool slot for the shared worker
         if !isnothing(shared_worker)
             shared_worker[] = take!(worker_pool)
@@ -1397,7 +1440,13 @@ function _runtests(mod::Module, args::ParsedArgs;
                           end
                           test_t1 = time()
                           output = @lock wrkr.io String(take!(wrkr.io[]))
-                          @lock results push!(results[], (; test, result, output, test_t0, test_t1))
+                          # a retry drops the record of the attempt it re-runs only once it
+                          # has one to put in its place: dropping them up front would lose
+                          # them outright if the phase is interrupted
+                          @lock results begin
+                              retry_mode && filter!(r -> r.test != test, results[])
+                              push!(results[], (; test, result, output, test_t0, test_t1))
+                          end
 
                           # act on the results
                           if result isa AbstractTestRecord
@@ -1410,6 +1459,11 @@ function _runtests(mod::Module, args::ParsedArgs;
                               if memory_usage(result) > max_worker_rss
                                   # the worker has reached the max-rss limit, recycle it
                                   # so future tests start with a smaller working set
+                                  Malt.stop(wrkr)
+                              elseif (recycle_on_failure || retry_mode) && anynonpass(result[])
+                                  # a failing test may have left the worker in a bad state
+                                  # (e.g. a wedged GPU driver whose every later allocation
+                                  # fails); recycle it so future tests get a fresh process
                                   Malt.stop(wrkr)
                               end
                           else
@@ -1461,6 +1515,10 @@ function _runtests(mod::Module, args::ParsedArgs;
     end
     try
         phases = test_phases
+
+        potential_retries = retries > 0 && args.quickfail === nothing
+
+        potential_retries && put!(printer_channel, (:nonpass_face, :ptr_warn))
         for i in 1:length(phases)
             phase_tests, sem, shared_worker = phases[i]
             isempty(phase_tests) && continue
@@ -1468,12 +1526,41 @@ function _runtests(mod::Module, args::ParsedArgs;
             run_test_phase(phase_tests, sem, shared_worker)
 
             # parallel workers are not stopped while serial tests remain (tests_to_start > 0);
-            # drain before serial-after so only one worker is alive for the serial phase
+            # drain before serial-after so only one worker is alive for the serial phase.
+            # one is kept rather than none so we do not add a third addworker (ID_COUNTER).
             if isnothing(shared_worker) && i < length(phases)
                 next_tests, _, next_sw = phases[i+1]
                 if !isempty(next_tests) && !isnothing(next_sw)
-                    drain_pool_leaving_one_worker!(worker_pool, jobs)
+                    drain_pool_leaving_n_workers!(worker_pool, jobs, 1)
                 end
+            end
+        end
+
+        # retries
+        if potential_retries
+            for i in 1:retries
+                # `stop_work()` may have been called from a worker task or the printer
+                # without any exception reaching the `catch` below, so we cannot assume we
+                # got here normally; there is no point retrying a run being torn down.
+                done[] && break
+
+                retry_tests = [r.test for r in results.value
+                                    if r.result isa Exception || anynonpass(r.result[])]
+                isempty(retry_tests) && break
+
+                # the last attempt of a test is the one that gets reported, so print it red
+                retries == i && put!(printer_channel, (:nonpass_face, :ptr_error))
+                put!(printer_channel, (:retry, length(retry_tests), i))
+                sem = Base.Semaphore(1)
+                shared_worker = serial_worker
+
+                # retries run on an otherwise-idle system: stop every worker left over
+                # from the previous phase, so the retry worker is spawned fresh below and
+                # no sibling process competes with it. `retry_mode` keeps it that way
+                # after each test that does not pass.
+                drain_pool_leaving_n_workers!(worker_pool, jobs, 0)
+
+                run_test_phase(retry_tests, sem, shared_worker; retry_mode=true)
             end
         end
     catch err
