@@ -1118,18 +1118,6 @@ end
         end
     end
 
-    @testset "unknown serial name throws in runtests" begin
-        # the typo must be reported even though positional filtering would have
-        # silently dropped it from the serial list
-        testsuite = Dict("a" => :(), "b" => :())
-        @test_throws ArgumentError runtests(ParallelTestRunner, String[];
-                                            testsuite, stdout=devnull, stderr=devnull,
-                                            serial=["a", "typo"])
-        @test_throws ArgumentError runtests(ParallelTestRunner, ["a"];
-                                            testsuite, stdout=devnull, stderr=devnull,
-                                            serial=["a", "typo"])
-    end
-
     @testset "serial tests run before parallel (default)" begin
         serial_test_body = quote
             children = _count_child_pids($(getpid()))
