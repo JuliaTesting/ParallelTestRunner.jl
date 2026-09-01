@@ -72,9 +72,9 @@ function get_max_worker_rss()
     elseif Sys.WORD_SIZE == 64
         totalmem = Sys.total_memory()
         if Sys.isapple()
-            if totalmem <= 8*2^30
+            if totalmem <= 8*Int64(2)^30
                 2000
-            elseif totalmem <= 16*2^30
+            elseif totalmem <= 16*Int64(2)^30
                 2500
             else
                 3800
