@@ -525,7 +525,7 @@ available_memory() = Sys.free_memory()
 end
 
 # Just use Sys.EFFECTIVE_CPU_THREADS when min VERSION >= v"1.13". NOT public
-const default_cpu_threads = (@static isdefined(Sys, :effective_cpu_threads) ? Sys.effective_cpu_threads() : Sys.CPU_THREADS)
+const default_cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS)
 
 # This is an internal function, not to be used by end users.  The keyword
 # arguments are only for testing purposes.
