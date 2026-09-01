@@ -1,6 +1,6 @@
 name = "ParallelTestRunner"
 uuid = "d3525ed8-44d0-4b2c-a655-542cee43accc"
-version = "2.8.1"
+version = "2.8.2"
 authors = ["Valentin Churavy <v.churavy@gmail.com>"]
 
 [deps]

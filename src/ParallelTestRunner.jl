@@ -63,12 +63,27 @@ worker_id(wrkr::PTRWorker) = wrkr.id
 Malt.isrunning(wrkr::PTRWorker) = Malt.isrunning(wrkr.w)
 Malt.stop(wrkr::PTRWorker) = Malt.stop(wrkr.w)
 
-#Always set the max rss so that if tests add large global variables (which they do) we don't make the GC's life too hard
+# Always set the max rss so that if tests add large global variables
+#  (which they do) we don't make the GC's life too hard. Apple's memory
+#  management makes setting this value more complicated than it should
 function get_max_worker_rss()
     mb = if haskey(ENV, "JULIA_TEST_MAXRSS_MB")
         parse(Int, ENV["JULIA_TEST_MAXRSS_MB"])
     elseif Sys.WORD_SIZE == 64
-        Sys.total_memory() > 8*Int64(2)^30 ? 3800 : 3000
+        totalmem = Sys.total_memory()
+        if Sys.isapple()
+            if totalmem <= 8*Int64(2)^30
+                2000
+            elseif totalmem <= 16*Int64(2)^30
+                2500
+            else
+                3800
+            end
+        elseif totalmem > 8*Int64(2)^30
+            3800
+        else # Low memory not on macOS
+            3000
+        end
     else
         # Assume that we only have 3.5GB available to a single process, and that a single
         # test can take up to 2GB of RSS.  This means that we should instruct the test
