@@ -64,6 +64,191 @@ end
     @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 34) == 4
 end
 
+@testset "memory pressure" begin
+    PTR = ParallelTestRunner
+    page = 4096
+    total = 16 * 2^30
+    plenty = 2^20  # 4 GiB of free pages
+
+    @testset "report from snapshots" begin
+        prev = PTR.VmStatistics64()
+        cur = PTR.VmStatistics64()
+        cur.free_count = plenty
+        cur.inactive_count = 10
+        cur.purgeable_count = 20
+        cur.compressor_page_count = 30
+        cur.wire_count = 40
+        cur.internal_page_count = 50
+        cur.external_page_count = 60
+        cur.total_uncompressed_pages_in_compressor = 70
+        r = PTR.MemoryPressureReport(0.0, prev, 1.0, cur; page_size=page, total)
+        @test r.status === :normal
+        @test isempty(r.reasons)
+        @test r.interval == 1.0
+        @test r.time == 1.0
+        @test r.page_size == page
+        @test r.total == total
+        @test r.available == (plenty + 10 + 20 + 30) * page
+        @test r.free == plenty * page
+        @test r.inactive == 10 * page
+        @test r.purgeable == 20 * page
+        @test r.compressor == 30 * page
+        @test r.wired == 40 * page
+        @test r.internal == 50 * page
+        @test r.external == 60 * page
+        @test r.uncompressed_in_compressor == 70 * page
+        @test r.compression_rate == 0
+        @test r.swapout_rate == 0
+        @test contains(sprint(show, r), "MemoryPressureReport(normal")
+        @test contains(sprint(show, MIME"text/plain"(), r), "available:")
+
+        # rates are scaled by page size and divided by the interval
+        prev.faults = 100
+        cur.faults = 300
+        cur.pageins = 10
+        cur.reactivations = 5
+        r = PTR.MemoryPressureReport(0.0, prev, 2.0, cur; page_size=page, total)
+        @test r.fault_rate == 200 * page / 2
+        @test r.pagein_rate == 10 * page / 2
+        @test r.reactivation_rate == 5 * page / 2
+        @test r.status === :normal
+
+        # sample times must increase
+        @test_throws ArgumentError PTR.MemoryPressureReport(1.0, prev, 1.0, cur; page_size=page, total)
+    end
+
+    @testset "contentious: compressor churn" begin
+        prev = PTR.VmStatistics64()
+        cur = PTR.VmStatistics64()
+        cur.free_count = plenty
+        cur.compressions = 2^15   # 128 MiB over 2 s = 64 MiB/s
+        cur.decompressions = 2^15
+        r = PTR.MemoryPressureReport(0.0, prev, 2.0, cur; page_size=page, total)
+        @test r.compression_rate == 2^15 * page / 2
+        @test r.decompression_rate == 2^15 * page / 2
+        @test r.status === :contentious
+        @test length(r.reasons) == 1
+        @test contains(only(r.reasons), "compressor churn")
+        @test contains(sprint(show, MIME"text/plain"(), r), "! compressor churn")
+
+        # thresholds are configurable
+        relaxed = PTR.MemoryPressureThresholds(; compressor_churn_rate = 1e12)
+        r = PTR.MemoryPressureReport(0.0, prev, 2.0, cur; page_size=page, total, thresholds=relaxed)
+        @test r.status === :normal
+    end
+
+    @testset "contentious: swap" begin
+        prev = PTR.VmStatistics64()
+        cur = PTR.VmStatistics64()
+        cur.free_count = plenty
+        cur.swapouts = 1  # any swap activity is contentious by default
+        r = PTR.MemoryPressureReport(0.0, prev, 1.0, cur; page_size=page, total)
+        @test r.swapout_rate == page
+        @test r.status === :contentious
+        @test contains(only(r.reasons), "swap traffic")
+    end
+
+    @testset "contentious: pageouts" begin
+        prev = PTR.VmStatistics64()
+        cur = PTR.VmStatistics64()
+        cur.free_count = plenty
+        cur.pageouts = 2^16  # 256 MiB over 1 s
+        r = PTR.MemoryPressureReport(0.0, prev, 1.0, cur; page_size=page, total)
+        @test r.status === :contentious
+        @test contains(only(r.reasons), "pageouts")
+    end
+
+    @testset "contentious: low availability" begin
+        prev = PTR.VmStatistics64()
+        cur = PTR.VmStatistics64()
+        cur.free_count = 1
+        r = PTR.MemoryPressureReport(0.0, prev, 1.0, cur; page_size=page, total)
+        @test r.status === :contentious
+        @test contains(only(r.reasons), "of memory available")
+
+        # multiple reasons accumulate
+        cur.swapins = 1
+        r = PTR.MemoryPressureReport(0.0, prev, 1.0, cur; page_size=page, total)
+        @test length(r.reasons) == 2
+    end
+
+    @testset "counter reset guard" begin
+        prev = PTR.VmStatistics64()
+        cur = PTR.VmStatistics64()
+        cur.free_count = plenty
+        prev.compressions = 100
+        cur.compressions = 50
+        r = PTR.MemoryPressureReport(0.0, prev, 1.0, cur; page_size=page, total)
+        @test r.compression_rate == 0
+        @test r.status === :normal
+    end
+
+    if Sys.isapple()
+        @testset "live sampling" begin
+            @test sizeof(PTR.VmStatistics64) == 152
+            vms = PTR.vm_statistics64()
+            @test vms.free_count > 0
+            @test vms.faults > 0
+            @test PTR.available_pages(vms) > 0
+            @test PTR.vm_page_size() in (4096, 16384)
+            @test PTR.available_memory() > 0
+        end
+
+        @testset "monitor" begin
+            @test_throws ArgumentError PTR.start_memory_pressure_monitor(; interval = 0)
+
+            m = PTR.start_memory_pressure_monitor(; interval = 0.1)
+            @test m isa PTR.MemoryPressureMonitor
+            @test m.interval == 0.1
+            @test isopen(m.channel)
+            sleep(0.6)
+            PTR.stop_memory_pressure_monitor(m)
+            @test istaskdone(m.task)
+            @test !isopen(m.timer)
+            @test !isopen(m.channel)
+            reports = collect(m.channel)
+            @test length(reports) >= 2
+            @test all(r -> r.status in (:normal, :contentious), reports)
+            @test all(r -> r.interval > 0, reports)
+            @test all(r -> r.total == Sys.total_memory(), reports)
+            @test issorted(r.time for r in reports)
+            # stopping twice is harmless
+            PTR.stop_memory_pressure_monitor(m)
+
+            # a consumer closing the channel stops the sampler
+            m = PTR.start_memory_pressure_monitor(; interval = 0.1)
+            sleep(0.3)
+            close(m.channel)
+            wait(m.task)
+            @test istaskdone(m.task)
+            @test !isopen(m.timer)
+
+            # a full channel drops the oldest report instead of stalling the sampler
+            ch = Channel{PTR.MemoryPressureReport}(2)
+            m = PTR.start_memory_pressure_monitor(; interval = 0.05, channel = ch)
+            sleep(0.6)
+            PTR.stop_memory_pressure_monitor(m)
+            reports = collect(ch)
+            @test length(reports) == 2
+            @test reports[end].time - reports[1].time < 0.3
+
+            # custom thresholds are stored and applied
+            strict = PTR.MemoryPressureThresholds(; available_fraction = 2.0)
+            m = PTR.start_memory_pressure_monitor(; interval = 0.1, thresholds = strict)
+            sleep(0.3)
+            PTR.stop_memory_pressure_monitor(m)
+            reports = collect(m.channel)
+            @test m.thresholds === strict
+            @test !isempty(reports)
+            @test all(r -> r.status === :contentious, reports)
+            @test all(r -> any(contains("of memory available"), r.reasons), reports)
+        end
+    else
+        @test_throws ErrorException PTR.vm_statistics64()
+        @test_throws ErrorException PTR.start_memory_pressure_monitor()
+    end
+end
+
 @testset "subdir use" begin
     d = @__DIR__
     testsuite = find_tests(d)

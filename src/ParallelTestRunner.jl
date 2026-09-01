@@ -472,8 +472,17 @@ function runtest(RecordType::Type{<:AbstractTestRecord}, f, name, init_code, sta
     end
 end
 
-@static if Sys.isapple()
+#
+# memory statistics and pressure monitoring
+#
 
+# Mirror of the first 24 fields (rev0 + rev1) of `struct vm_statistics64` from macOS'
+# `<mach/vm_statistics.h>`. All `*_count` fields are instantaneous page counts, the
+# `UInt64` fields without a `_count` suffix are monotonic lifetime counters.
+# `host_statistics64` only fills as many words as we ask for, so mirroring a prefix of
+# the newer, longer kernel struct is safe. The struct itself is defined on every
+# platform so that reports can be constructed (and tested) anywhere; only sampling it
+# from the kernel is macOS-specific.
 mutable struct VmStatistics64
 	free_count::UInt32
 	active_count::UInt32
@@ -505,22 +514,318 @@ mutable struct VmStatistics64
 	VmStatistics64() = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 end
 
+vm_page_size() = Int(ccall(:jl_getpagesize, Clong, ()))
 
-function available_memory()
-	vms = Ref{VmStatistics64}(VmStatistics64())
-	mach_host_self = @ccall mach_host_self()::UInt32
-	count = UInt32(sizeof(VmStatistics64) ÷ sizeof(Int32))
-	ref_count = Ref(count)
-	@ccall host_statistics64(mach_host_self::UInt32, 4::Int64, pointer_from_objref(vms[])::Ptr{Int64}, ref_count::Ref{UInt32})::Int64
+# Pages the runner considers available for new workers: free + inactive + purgeable
+# + compressor. This is optimistic under pressure since compressor pages cost CPU
+# (or disk) to reclaim; see `MemoryPressureReport` for the dynamic picture.
+function available_pages(vms::VmStatistics64)
+	return Int(vms.free_count) + Int(vms.inactive_count) + Int(vms.purgeable_count) + Int(vms.compressor_page_count)
+end
 
-	page_size = Int(@ccall sysconf(29::UInt32)::UInt32)
+"""
+    MemoryPressureThresholds(; kwargs...)
 
-	return (Int(vms[].free_count) + Int(vms[].inactive_count) + Int(vms[].purgeable_count) + Int(vms[].compressor_page_count)) * page_size
+Thresholds used to decide whether a [`MemoryPressureReport`](@ref) is `:normal` or
+`:contentious`. All rates are in bytes per second averaged over the sampling interval.
+A report is contentious as soon as any one threshold is exceeded.
+
+- `swap_rate`: swap traffic (`swapins + swapouts`) above this is contentious.
+  Defaults to `0.0`, i.e. any swap activity at all, since swapping compressor segments
+  to disk is the most severe form of thrashing on macOS.
+- `compressor_churn_rate`: `compressions + decompressions` above this is contentious.
+  Pages being compressed and immediately decompressed means the compressor is churning
+  working-set memory rather than cold data (default: 64 MiB/s).
+- `pageout_rate`: `pageouts` above this is contentious (default: 64 MiB/s).
+- `available_fraction`: available memory below this fraction of physical memory is
+  contentious (default: `0.05`). Availability uses the same formula as the runner
+  uses to pick the default number of jobs.
+"""
+Base.@kwdef struct MemoryPressureThresholds
+	swap_rate::Float64 = 0.0
+	compressor_churn_rate::Float64 = 64 * 2.0^20
+	pageout_rate::Float64 = 64 * 2.0^20
+	available_fraction::Float64 = 0.05
+end
+
+"""
+    MemoryPressureReport
+
+One sample produced by a [`MemoryPressureMonitor`](@ref), describing the state of the
+macOS virtual memory system over the interval since the previous sample. Instantaneous
+quantities are in bytes; rates are in bytes per second, obtained by differencing the
+kernel's lifetime page counters and scaling by the page size.
+
+Fields:
+
+- `time`: wall-clock time of the sample, as returned by `time()`.
+- `interval`: seconds since the previous sample.
+- `page_size`: VM page size in bytes.
+- `total`: physical memory.
+- `available`: free + inactive + purgeable + compressor memory. Same formula as the
+  runner uses to pick the default number of jobs.
+- `free`, `inactive`, `purgeable`, `wired`, `internal` (anonymous), `external`
+  (file-backed): resident memory by category.
+- `compressor`: physical memory used to hold compressed pages.
+- `uncompressed_in_compressor`: logical size of the data held in the compressor.
+  Comparing this to `compressor` gives the effective compression ratio.
+- `compression_rate`, `decompression_rate`: compressor traffic. Both high at the same
+  time is the first sign of thrashing on macOS.
+- `swapin_rate`, `swapout_rate`: compressor segments moved to and from disk. Any
+  sustained value here is severe thrashing.
+- `pagein_rate`, `pageout_rate`: pages read from and written to backing store.
+- `reactivation_rate`: inactive pages promoted back to active because they were used
+  again, i.e. the reclaim pipeline failing to find truly cold memory.
+- `fault_rate`: all page faults, including soft faults. Mostly useful as a denominator.
+- `status`: `:normal` or `:contentious`, decided by [`MemoryPressureThresholds`](@ref).
+- `reasons`: human-readable explanations for a `:contentious` status; empty otherwise.
+"""
+struct MemoryPressureReport
+	time::Float64
+	interval::Float64
+	page_size::Int
+
+	total::Int
+	available::Int
+	free::Int
+	inactive::Int
+	purgeable::Int
+	wired::Int
+	internal::Int
+	external::Int
+	compressor::Int
+	uncompressed_in_compressor::Int
+
+	compression_rate::Float64
+	decompression_rate::Float64
+	swapin_rate::Float64
+	swapout_rate::Float64
+	pagein_rate::Float64
+	pageout_rate::Float64
+	reactivation_rate::Float64
+	fault_rate::Float64
+
+	status::Symbol
+	reasons::Vector{String}
+end
+
+# Build a report from two consecutive snapshots.
+function MemoryPressureReport(t0::Real, prev::VmStatistics64, t1::Real, cur::VmStatistics64;
+                              thresholds::MemoryPressureThresholds = MemoryPressureThresholds(),
+                              page_size::Integer = vm_page_size(),
+                              total::Integer = Sys.total_memory())
+	interval = Float64(t1 - t0)
+	interval > 0 || throw(ArgumentError("sample times must be strictly increasing"))
+	bytes(pages) = Int(pages) * Int(page_size)
+	# lifetime counters are monotonic, but guard against a wrapped or reset counter
+	rate(f) = max(0.0, Float64(Int(getfield(cur, f)) - Int(getfield(prev, f)))) * page_size / interval
+
+	available = bytes(available_pages(cur))
+	compression_rate = rate(:compressions)
+	decompression_rate = rate(:decompressions)
+	swapin_rate = rate(:swapins)
+	swapout_rate = rate(:swapouts)
+	pageout_rate = rate(:pageouts)
+
+	reasons = String[]
+	swap = swapin_rate + swapout_rate
+	if swap > thresholds.swap_rate
+		push!(reasons, "swap traffic at $(Base.format_bytes(round(Int, swap)))/s")
+	end
+	churn = compression_rate + decompression_rate
+	if churn > thresholds.compressor_churn_rate
+		push!(reasons, "compressor churn at $(Base.format_bytes(round(Int, churn)))/s")
+	end
+	if pageout_rate > thresholds.pageout_rate
+		push!(reasons, "pageouts at $(Base.format_bytes(round(Int, pageout_rate)))/s")
+	end
+	if available < thresholds.available_fraction * total
+		pct = round(100 * available / total; digits=1)
+		push!(reasons, "only $(Base.format_bytes(available)) ($pct%) of memory available")
+	end
+	status = isempty(reasons) ? :normal : :contentious
+
+	return MemoryPressureReport(
+		Float64(t1), interval, Int(page_size),
+		Int(total), available,
+		bytes(cur.free_count), bytes(cur.inactive_count), bytes(cur.purgeable_count),
+		bytes(cur.wire_count), bytes(cur.internal_page_count), bytes(cur.external_page_count),
+		bytes(cur.compressor_page_count), bytes(cur.total_uncompressed_pages_in_compressor),
+		compression_rate, decompression_rate, swapin_rate, swapout_rate,
+		rate(:pageins), pageout_rate, rate(:reactivations), rate(:faults),
+		status, reasons,
+	)
+end
+
+function Base.show(io::IO, r::MemoryPressureReport)
+	fmt(x) = Base.format_bytes(round(Int, x))
+	print(io, "MemoryPressureReport(", r.status,
+	      ": available ", fmt(r.available), "/", fmt(r.total),
+	      ", compressor ", fmt(r.compressor),
+	      ", compress ", fmt(r.compression_rate), "/s",
+	      ", decompress ", fmt(r.decompression_rate), "/s",
+	      ", swap ", fmt(r.swapin_rate + r.swapout_rate), "/s",
+	      ", pageout ", fmt(r.pageout_rate), "/s)")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", r::MemoryPressureReport)
+	fmt(x) = Base.format_bytes(round(Int, x))
+	println(io, "MemoryPressureReport (", r.status, ") over ", round(r.interval; digits=2), " s")
+	println(io, "  available:      ", fmt(r.available), " of ", fmt(r.total))
+	println(io, "  free/inactive:  ", fmt(r.free), " / ", fmt(r.inactive))
+	println(io, "  wired/internal: ", fmt(r.wired), " / ", fmt(r.internal))
+	println(io, "  external:       ", fmt(r.external))
+	println(io, "  compressor:     ", fmt(r.compressor), " holding ", fmt(r.uncompressed_in_compressor))
+	println(io, "  compressions:   ", fmt(r.compression_rate), "/s, decompressions ", fmt(r.decompression_rate), "/s")
+	println(io, "  swap:           in ", fmt(r.swapin_rate), "/s, out ", fmt(r.swapout_rate), "/s")
+	println(io, "  paging:         in ", fmt(r.pagein_rate), "/s, out ", fmt(r.pageout_rate), "/s")
+	print(io,   "  reactivations:  ", fmt(r.reactivation_rate), "/s, faults ", fmt(r.fault_rate), "/s")
+	for reason in r.reasons
+		print(io, "\n  ! ", reason)
+	end
+end
+
+"""
+    MemoryPressureMonitor
+
+Handle returned by [`start_memory_pressure_monitor`](@ref). Iterate `monitor.channel`
+to receive [`MemoryPressureReport`](@ref)s; call [`stop_memory_pressure_monitor`](@ref)
+to stop sampling, which also closes the channel once the last report has been delivered.
+"""
+mutable struct MemoryPressureMonitor
+	channel::Channel{MemoryPressureReport}
+	timer::Timer
+	task::Task
+	interval::Float64
+	thresholds::MemoryPressureThresholds
+end
+
+"""
+    stop_memory_pressure_monitor(monitor::MemoryPressureMonitor)
+
+Stop sampling and close `monitor.channel`. Reports already in the channel remain
+available to consumers. Returns once the sampling task has exited.
+"""
+function stop_memory_pressure_monitor(monitor::MemoryPressureMonitor)
+	close(monitor.timer)
+	wait(monitor.task)
+	return
+end
+
+"""
+    start_memory_pressure_monitor(; interval = 5.0,
+                                    thresholds = MemoryPressureThresholds(),
+                                    channel = Channel{MemoryPressureReport}(64),
+                                    drop_oldest = true)
+
+Start a background task that samples the macOS virtual memory statistics every
+`interval` seconds and puts a [`MemoryPressureReport`](@ref) into `channel`. Each report
+covers the interval since the previous sample and carries a `:normal` or `:contentious`
+verdict, decided by `thresholds`.
+
+A baseline sample is taken immediately, so the first report arrives after `interval`
+seconds. If nobody drains the channel and it fills up, the oldest report is discarded to
+make room when `drop_oldest` is `true`; otherwise the sampler blocks until a consumer
+takes a report. Closing the channel from the consumer side stops the monitor.
+
+Returns a [`MemoryPressureMonitor`](@ref). Stop it with
+[`stop_memory_pressure_monitor`](@ref).
+
+```julia
+monitor = ParallelTestRunner.start_memory_pressure_monitor(; interval = 2.0)
+consumer = @async for report in monitor.channel
+    report.status === :contentious && @warn "memory pressure" report
+end
+runtests(MyPackage, ARGS)
+ParallelTestRunner.stop_memory_pressure_monitor(monitor)
+wait(consumer)
+```
+
+Only available on macOS; on other platforms this throws an `ErrorException`.
+"""
+function start_memory_pressure_monitor end
+
+@static if Sys.isapple()
+
+const HOST_VM_INFO64 = Cint(4)
+const KERN_SUCCESS = Cint(0)
+
+# Take a snapshot of the kernel's VM statistics.
+function vm_statistics64()
+	vms = VmStatistics64()
+	host = @ccall mach_host_self()::UInt32
+	count = Ref(UInt32(sizeof(VmStatistics64) ÷ sizeof(Int32)))
+	kr = GC.@preserve vms begin
+		@ccall host_statistics64(host::UInt32, HOST_VM_INFO64::Cint,
+		                         pointer_from_objref(vms)::Ptr{Cvoid},
+		                         count::Ref{UInt32})::Cint
+	end
+	# `mach_host_self` hands out a new send right on every call; release it so a
+	# long-running sampler does not accumulate references.
+	task = unsafe_load(cglobal(:mach_task_self_, UInt32))
+	@ccall mach_port_deallocate(task::UInt32, host::UInt32)::Cint
+	kr == KERN_SUCCESS || error("host_statistics64 failed with kern_return_t = $kr")
+	return vms
+end
+
+available_memory() = available_pages(vm_statistics64()) * vm_page_size()
+
+function start_memory_pressure_monitor(; interval::Real = 5.0,
+                                         thresholds::MemoryPressureThresholds = MemoryPressureThresholds(),
+                                         channel::Channel{MemoryPressureReport} = Channel{MemoryPressureReport}(64),
+                                         drop_oldest::Bool = true)
+	interval > 0 || throw(ArgumentError("interval must be positive, got $interval"))
+	page_size = vm_page_size()
+	total = Sys.total_memory()
+	timer = Timer(interval; interval)
+	task = @async begin
+		t0, prev = time(), vm_statistics64()
+		try
+			while isopen(timer) && isopen(channel)
+				try
+					wait(timer)
+				catch ex
+					# closing the timer wakes waiters with an EOFError
+					ex isa EOFError && break
+					rethrow()
+				end
+				t1, cur = time(), vm_statistics64()
+				report = MemoryPressureReport(t0, prev, t1, cur; thresholds, page_size, total)
+				t0, prev = t1, cur
+				try
+					if drop_oldest
+						lock(channel)
+						try
+							if Base.n_avail(channel) >= channel.sz_max
+								take!(channel)
+							end
+						finally
+							unlock(channel)
+						end
+					end
+					put!(channel, report)
+				catch ex
+					# the consumer closed the channel; we're done
+					ex isa InvalidStateException && break
+					rethrow()
+				end
+			end
+		finally
+			close(timer)
+			close(channel)
+		end
+	end
+	return MemoryPressureMonitor(channel, timer, task, Float64(interval), thresholds)
 end
 
 else
 
 available_memory() = Sys.free_memory()
+
+vm_statistics64() = error("VM statistics sampling is only supported on macOS")
+
+start_memory_pressure_monitor(; kwargs...) =
+	error("memory pressure monitoring is only supported on macOS")
 
 end
 

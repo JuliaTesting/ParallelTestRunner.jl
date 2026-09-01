@@ -39,6 +39,21 @@ addworkers
 default_njobs
 ```
 
+## Memory Pressure Monitoring
+
+On macOS, the kernel's virtual memory counters can be sampled on a timer to tell whether
+a test run is merely using a lot of memory or actively thrashing (compressor churn, swap
+traffic). Reports are delivered through a `Channel`, so callers decide how to react.
+See [Diagnosing memory pressure](@ref) for a worked example.
+
+```@docs
+start_memory_pressure_monitor
+stop_memory_pressure_monitor
+MemoryPressureMonitor
+MemoryPressureReport
+MemoryPressureThresholds
+```
+
 ## Custom Records
 
 Per-test data is captured in an [`AbstractTestRecord`](@ref). The default

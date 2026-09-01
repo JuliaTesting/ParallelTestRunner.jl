@@ -331,6 +331,62 @@ function jltest {
 }
 ```
 
+## Diagnosing memory pressure
+
+The default number of jobs is chosen from a single snapshot of available memory taken
+before the run starts. That snapshot cannot tell whether the machine later ends up
+thrashing once all workers are allocating. On macOS, the kernel's virtual memory
+counters can be sampled on a timer with
+[`start_memory_pressure_monitor`](@ref) to answer that question during the run.
+
+Each [`MemoryPressureReport`](@ref) covers the interval since the previous sample and
+carries the rates that matter for thrashing: compressor traffic (`compression_rate`,
+`decompression_rate`), swap traffic (`swapin_rate`, `swapout_rate`) and pageouts, plus
+the resident memory breakdown at the end of the interval. A report is marked
+`:contentious` as soon as any threshold in [`MemoryPressureThresholds`](@ref) is
+exceeded, with a human-readable reason for each. Reports arrive through a `Channel`, so
+the consumer decides what to do with them:
+
+```julia
+using ParallelTestRunner
+using MyPackage
+
+if Sys.isapple()
+    monitor = ParallelTestRunner.start_memory_pressure_monitor(; interval = 2.0)
+    consumer = @async for report in monitor.channel
+        if report.status === :contentious
+            @warn "Memory pressure detected" reasons = report.reasons report
+        end
+    end
+end
+
+try
+    runtests(MyPackage, ARGS)
+finally
+    if Sys.isapple()
+        ParallelTestRunner.stop_memory_pressure_monitor(monitor)
+        wait(consumer)
+    end
+end
+```
+
+Stopping the monitor closes the channel once the last report has been delivered, so
+the consumer loop terminates on its own. If a run is flagged as contentious, the usual
+remedies are lowering `--jobs=N`, moving the largest tests to the `serial` list, or
+lowering `max_worker_rss` so bloated workers are recycled sooner.
+
+The default thresholds treat any swap activity as contentious, and flag compressor
+churn or pageouts above 64 MiB/s. They can be relaxed or tightened with keyword
+arguments to [`MemoryPressureThresholds`](@ref):
+
+```julia
+thresholds = ParallelTestRunner.MemoryPressureThresholds(;
+    compressor_churn_rate = 256 * 2^20,  # 256 MiB/s
+    available_fraction = 0.10,
+)
+monitor = ParallelTestRunner.start_memory_pressure_monitor(; interval = 5.0, thresholds)
+```
+
 ## Best Practices
 
 1. **Keep tests isolated**: Each test file runs in its own module, so avoid relying on global state between tests.
