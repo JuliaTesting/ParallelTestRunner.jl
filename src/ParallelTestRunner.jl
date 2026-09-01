@@ -685,6 +685,19 @@ function Base.show(io::IO, ::MIME"text/plain", r::MemoryPressureReport)
 	end
 end
 
+# One-line summary of a report for the runner's status bar. Plain text so it can be
+# truncated to the terminal width; the caller colors it when contentious.
+function memory_status_line(r::MemoryPressureReport)
+	fmt(x) = Base.format_bytes(round(Int, x))
+	if r.status === :contentious
+		return "Memory:   contentious │ " * join(r.reasons, ", ")
+	else
+		return "Memory:   normal │ available $(fmt(r.available)) │ compressor $(fmt(r.compressor)) " *
+		       "(in $(fmt(r.compression_rate))/s, out $(fmt(r.decompression_rate))/s) │ " *
+		       "swap $(fmt(r.swapin_rate + r.swapout_rate))/s"
+	end
+end
+
 """
     MemoryPressureMonitor
 
@@ -1330,11 +1343,12 @@ Workers are automatically recycled when they exceed memory limits to prevent out
 issues during long test runs. The memory limit is set based on system architecture.
 
 On macOS, with `monitor_memory = true` (the default), the kernel's virtual memory counters
-are sampled every 5 seconds while tests run. A warning is printed when the machine starts
-thrashing (swap traffic, heavy compressor churn or pageouts, or very little memory left)
-and again when it recovers, and a summary is printed at the end of the run if any sample
-was contentious. This helps distinguish a run that merely uses a lot of memory from one
-where too many parallel jobs are fighting over it. See
+are sampled every 5 seconds while tests run. The latest sample is shown as a `Memory:`
+line in the status bar below the progress line, flagged as contentious when the machine
+is thrashing (swap traffic, heavy compressor churn or pageouts, or very little memory
+left), and a summary is printed at the end of the run if any sample was contentious.
+This helps distinguish a run that merely uses a lot of memory from one where too many
+parallel jobs are fighting over it. See
 [`start_memory_pressure_monitor`](@ref) to consume the same reports programmatically.
 
 ## Failure Handling
@@ -1519,6 +1533,11 @@ function _runtests(mod::Module, args::ParsedArgs;
 
     status_lines_visible = Ref(0)
 
+    # memory pressure state, fed by the printer task and shown in the status bar
+    latest_pressure = Ref{Union{Nothing, MemoryPressureReport}}(nothing)
+    pressure_samples = Ref(0)
+    pressure_contentious = Ref(0)
+
     function clear_status()
         if status_lines_visible[] > 0
             for _ in 1:(status_lines_visible[]-1)
@@ -1581,15 +1600,30 @@ function _runtests(mod::Module, args::ParsedArgs;
             line3 *= " │ ETA: ~$eta_mins min"
         end
 
+        # line 4 (optional): memory pressure
+        report = latest_pressure[]
+        line4 = if report === nothing
+            nothing
+        else
+            line = truncate_line(memory_status_line(report), max_width)
+            report.status === :contentious ? styled"{ptr_warn:$line}" : line
+        end
+
         # only display the status bar on actual terminals
         # (but make sure we cover this code in CI)
         if io_ctx.stdout isa Base.TTY
             clear_status()
             println(io_ctx.stdout, line1)
             println(io_ctx.stdout, line2)
-            print(io_ctx.stdout, line3)
+            if line4 === nothing
+                print(io_ctx.stdout, line3)
+                status_lines_visible[] = 3
+            else
+                println(io_ctx.stdout, line3)
+                print(io_ctx.stdout, line4)
+                status_lines_visible[] = 4
+            end
             flush(io_ctx.stdout)
-            status_lines_visible[] = 3
         end
     end
 
@@ -1613,9 +1647,6 @@ function _runtests(mod::Module, args::ParsedArgs;
             put!(printer_channel, (:memory_pressure, report))
         end
     end
-    pressure_status = Ref(:normal)
-    pressure_samples = Ref(0)
-    pressure_contentious = Ref(0)
 
     printer_task = @async begin
         last_status_update = Ref(time())
@@ -1672,27 +1703,12 @@ function _runtests(mod::Module, args::ParsedArgs;
                         io_ctx.nonpass_face[] = msg[2]
 
                     elseif msg_type === :memory_pressure
+                        # shown by `update_status` below; no line of its own so that a
+                        # long stretch of pressure doesn't flood the results table
                         report = msg[2]
+                        latest_pressure[] = report
                         pressure_samples[] += 1
                         report.status === :contentious && (pressure_contentious[] += 1)
-                        # only print on transitions, so a long stretch of pressure
-                        # produces two lines rather than one per sample
-                        if report.status !== pressure_status[]
-                            pressure_status[] = report.status
-                            clear_status()
-                            lock(io_ctx.lock)
-                            try
-                                if report.status === :contentious
-                                    reasons = join(report.reasons, ", ")
-                                    println(io_ctx.stdout, styled"{ptr_warn:Memory pressure: contentious ($reasons)}")
-                                else
-                                    println(io_ctx.stdout, styled"{ptr_light:Memory pressure: back to normal}")
-                                end
-                                flush(io_ctx.stdout)
-                            finally
-                                unlock(io_ctx.lock)
-                            end
-                        end
                     end
                 end
 

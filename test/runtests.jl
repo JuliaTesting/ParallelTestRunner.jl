@@ -101,6 +101,10 @@ end
         @test r.swapout_rate == 0
         @test contains(sprint(show, r), "MemoryPressureReport(normal")
         @test contains(sprint(show, MIME"text/plain"(), r), "available:")
+        line = PTR.memory_status_line(r)
+        @test startswith(line, "Memory:   normal │ available 4.000 GiB")
+        @test contains(line, "compressor 120.000 KiB")
+        @test contains(line, "swap 0 bytes/s")
 
         # rates are scaled by page size and divided by the interval
         prev.faults = 100
@@ -130,6 +134,7 @@ end
         @test length(r.reasons) == 1
         @test contains(only(r.reasons), "compressor churn")
         @test contains(sprint(show, MIME"text/plain"(), r), "! compressor churn")
+        @test PTR.memory_status_line(r) == "Memory:   contentious │ " * only(r.reasons)
 
         # thresholds are configurable
         relaxed = PTR.MemoryPressureThresholds(; compressor_churn_rate = 1e12)
@@ -264,7 +269,8 @@ end
     @test !contains(str, "Memory pressure")
 
     if Sys.isapple()
-        # everything looks contentious: transition line plus summary
+        # everything looks contentious: the live status bar is only rendered on a TTY,
+        # so on a buffer only the end-of-run summary shows up
         always = PTR.MemoryPressureThresholds(; available_fraction = 2.0)
         io = IOBuffer()
         PTR._runtests(PTR, parse_args(["--verbose"]); testsuite, tests,
@@ -272,11 +278,8 @@ end
         str = String(take!(io))
         @test contains(str, "SUCCESS")
         @test contains(str, "Monitoring memory pressure every 0.1 s")
-        @test contains(str, "Memory pressure: contentious (only")
-        @test contains(str, "of memory available)")
-        @test count("Memory pressure: contentious", str) == 1  # printed on transition only
         @test contains(str, r"Memory pressure was contentious in \d+ of \d+ samples")
-        @test !contains(str, "back to normal")
+        @test !contains(str, "Memory:   ")  # no per-sample lines outside the status bar
 
         # nothing ever looks contentious: silent
         never = PTR.MemoryPressureThresholds(; swap_rate = Inf, compressor_churn_rate = Inf,

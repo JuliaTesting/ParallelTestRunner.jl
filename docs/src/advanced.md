@@ -337,16 +337,24 @@ The default number of jobs is chosen from a single snapshot of available memory 
 before the run starts. That snapshot cannot tell whether the machine later ends up
 thrashing once all workers are allocating. On macOS, [`runtests`](@ref) therefore samples
 the kernel's virtual memory counters every 5 seconds while tests run (keyword
-`monitor_memory`, `true` by default). When a sample crosses one of the default
-thresholds, a warning line is printed between result rows:
+`monitor_memory`, `true` by default). The latest sample is shown as an extra line in the
+status bar below the progress line:
 
 ```
-Memory pressure: contentious (compressor churn at 210.5 MiB/s, swap traffic at 12.0 MiB/s)
-...
-Memory pressure: back to normal
+Running:  integration, linalg, io
+Progress: 12/40 tests completed │ ETA: ~3 min
+Memory:   normal │ available 9.2 GiB │ compressor 3.7 GiB (in 0 bytes/s, out 41.7 KiB/s) │ swap 0 bytes/s
 ```
 
-and if any sample was contentious, a summary is printed before the final test results:
+When a sample crosses one of the thresholds the line turns yellow and lists the reasons
+instead:
+
+```
+Memory:   contentious │ compressor churn at 210.5 MiB/s, swap traffic at 12.0 MiB/s
+```
+
+The status bar is only shown on a terminal. In either case, if any sample was
+contentious, a summary is printed before the final test results:
 
 ```
 Memory pressure was contentious in 14 of 52 samples. Consider lowering `--jobs=N`, moving large tests to `serial`, or lowering `max_worker_rss`.
