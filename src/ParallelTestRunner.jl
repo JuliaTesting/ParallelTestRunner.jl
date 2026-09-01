@@ -1194,7 +1194,8 @@ end
              serial = String[],
              serial_position::Symbol = :before,
              recycle_on_failure::Bool = false,
-             retries::Integer = 0)
+             retries::Integer = 0,
+             monitor_memory::Bool = true)
     runtests(mod::Module, ARGS; ...)
 
 Run Julia tests in parallel across multiple worker processes.
@@ -1245,6 +1246,9 @@ Several keyword arguments are also supported:
   (default: `false`). See the Failure Handling section below.
 - `retries`: How many times to re-run tests that did not pass after the main run completes
   (default: `0`). See the Failure Handling section below.
+- `monitor_memory`: Whether to sample the kernel's virtual memory counters during the run
+  and warn when the machine is thrashing (default: `true`). Only active on macOS; see the
+  Memory Management section below.
 
 ## Command Line Options
 
@@ -1325,6 +1329,14 @@ runtests(MyPackage, ARGS; serial=["big_alloc_test", "huge_matrix"])
 Workers are automatically recycled when they exceed memory limits to prevent out-of-memory
 issues during long test runs. The memory limit is set based on system architecture.
 
+On macOS, with `monitor_memory = true` (the default), the kernel's virtual memory counters
+are sampled every 5 seconds while tests run. A warning is printed when the machine starts
+thrashing (swap traffic, heavy compressor churn or pageouts, or very little memory left)
+and again when it recovers, and a summary is printed at the end of the run if any sample
+was contentious. This helps distinguish a run that merely uses a lot of memory from one
+where too many parallel jobs are fighting over it. See
+[`start_memory_pressure_monitor`](@ref) to consume the same reports programmatically.
+
 ## Failure Handling
 
 With `recycle_on_failure = true`, a worker is recycled after any test that did not pass, so
@@ -1349,6 +1361,7 @@ function runtests(mod::Module, args::ParsedArgs;
                   max_worker_rss = get_max_worker_rss(),
                   recycle_on_failure::Bool = false,
                   retries::Integer = 0,
+                  monitor_memory::Bool = true,
                   )
     #
     # set-up
@@ -1401,6 +1414,7 @@ function runtests(mod::Module, args::ParsedArgs;
         max_worker_rss,
         recycle_on_failure,
         retries,
+        monitor_memory,
     )
 end
 
@@ -1425,6 +1439,10 @@ function _runtests(mod::Module, args::ParsedArgs;
                    max_worker_rss = get_max_worker_rss(),
                    recycle_on_failure::Bool = false,
                    retries::Integer = 0,
+                   monitor_memory::Bool = true,
+                   # the two below are only meant for testing the memory monitor integration
+                   memory_interval::Real = 5.0,
+                   memory_thresholds::MemoryPressureThresholds = MemoryPressureThresholds(),
                    )
 
     # partition into serial and parallel groups
@@ -1441,8 +1459,12 @@ function _runtests(mod::Module, args::ParsedArgs;
     if !isempty(serial_tests)
         println(stdout, "  $(length(serial_tests)) serial test(s) will run $(serial_position) the parallel batch.")
     end
+    monitor_memory = monitor_memory && Sys.isapple()
     if !isnothing(args.verbose)
         println(stdout, styled"Available memory: {bold:$(Base.format_bytes(available_memory()))}; Max worker RSS: {bold:$(Base.format_bytes(max_worker_rss))}")
+        if monitor_memory
+            println(stdout, styled"Monitoring memory pressure every {bold:$(memory_interval) s}")
+        end
     end
 
     t0 = time()
@@ -1577,7 +1599,23 @@ function _runtests(mod::Module, args::ParsedArgs;
     # (:crashed, test_name, worker_id, test_time)
     # (:retry, tests_n, retry_n)
     # (:nonpass_face, face)
+    # (:memory_pressure, report)
     printer_channel = Channel{Tuple}(100)
+
+    # memory pressure monitoring (macOS only): reports are routed through the printer so
+    # that warnings land between result rows instead of in the middle of one
+    memory_monitor = nothing
+    memory_forwarder = nothing
+    if monitor_memory
+        memory_monitor = start_memory_pressure_monitor(; interval = memory_interval,
+                                                         thresholds = memory_thresholds)
+        memory_forwarder = @async for report in memory_monitor.channel
+            put!(printer_channel, (:memory_pressure, report))
+        end
+    end
+    pressure_status = Ref(:normal)
+    pressure_samples = Ref(0)
+    pressure_contentious = Ref(0)
 
     printer_task = @async begin
         last_status_update = Ref(time())
@@ -1632,6 +1670,29 @@ function _runtests(mod::Module, args::ParsedArgs;
                         # in order with the results it applies to: the coordinator flips it
                         # while this task may still be draining the previous round
                         io_ctx.nonpass_face[] = msg[2]
+
+                    elseif msg_type === :memory_pressure
+                        report = msg[2]
+                        pressure_samples[] += 1
+                        report.status === :contentious && (pressure_contentious[] += 1)
+                        # only print on transitions, so a long stretch of pressure
+                        # produces two lines rather than one per sample
+                        if report.status !== pressure_status[]
+                            pressure_status[] = report.status
+                            clear_status()
+                            lock(io_ctx.lock)
+                            try
+                                if report.status === :contentious
+                                    reasons = join(report.reasons, ", ")
+                                    println(io_ctx.stdout, styled"{ptr_warn:Memory pressure: contentious ($reasons)}")
+                                else
+                                    println(io_ctx.stdout, styled"{ptr_light:Memory pressure: back to normal}")
+                                end
+                                flush(io_ctx.stdout)
+                            finally
+                                unlock(io_ctx.lock)
+                            end
+                        end
                     end
                 end
 
@@ -1888,6 +1949,13 @@ function _runtests(mod::Module, args::ParsedArgs;
     # finalization
     #
 
+    # stop sampling memory pressure; the forwarder exits once the monitor's channel
+    # is drained, so every report reaches the printer before it is closed below
+    if memory_monitor !== nothing
+        stop_memory_pressure_monitor(memory_monitor)
+        wait(memory_forwarder)
+    end
+
     # wait for the printer to finish so that all results have been printed
     close(printer_channel)
     wait(printer_task)
@@ -2024,6 +2092,12 @@ function _runtests(mod::Module, args::ParsedArgs;
         end
     end
     save_test_history(mod, (historical_durations, historical_failures))
+
+    # summarize memory pressure, if the machine was thrashing at any point
+    if pressure_contentious[] > 0
+        println(io_ctx.stdout)
+        println(io_ctx.stdout, styled"{ptr_warn:Memory pressure was contentious in $(pressure_contentious[]) of $(pressure_samples[]) samples. Consider lowering `--jobs=N`, moving large tests to `serial`, or lowering `max_worker_rss`.}")
+    end
 
     # display the results
     println(io_ctx.stdout)

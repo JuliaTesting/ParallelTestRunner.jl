@@ -249,6 +249,61 @@ end
     end
 end
 
+@testset "memory monitoring in runtests" begin
+    PTR = ParallelTestRunner
+    testsuite = Dict("sleepy" => :(sleep(1); @test true))
+    tests = ["sleepy"]
+
+    # disabled: no monitor output at all
+    io = IOBuffer()
+    PTR._runtests(PTR, parse_args(["--verbose"]); testsuite, tests,
+                  stdout=io, stderr=io, monitor_memory=false, memory_interval=0.1)
+    str = String(take!(io))
+    @test contains(str, "SUCCESS")
+    @test !contains(str, "Monitoring memory pressure")
+    @test !contains(str, "Memory pressure")
+
+    if Sys.isapple()
+        # everything looks contentious: transition line plus summary
+        always = PTR.MemoryPressureThresholds(; available_fraction = 2.0)
+        io = IOBuffer()
+        PTR._runtests(PTR, parse_args(["--verbose"]); testsuite, tests,
+                      stdout=io, stderr=io, memory_interval=0.1, memory_thresholds=always)
+        str = String(take!(io))
+        @test contains(str, "SUCCESS")
+        @test contains(str, "Monitoring memory pressure every 0.1 s")
+        @test contains(str, "Memory pressure: contentious (only")
+        @test contains(str, "of memory available)")
+        @test count("Memory pressure: contentious", str) == 1  # printed on transition only
+        @test contains(str, r"Memory pressure was contentious in \d+ of \d+ samples")
+        @test !contains(str, "back to normal")
+
+        # nothing ever looks contentious: silent
+        never = PTR.MemoryPressureThresholds(; swap_rate = Inf, compressor_churn_rate = Inf,
+                                              pageout_rate = Inf, available_fraction = 0.0)
+        io = IOBuffer()
+        PTR._runtests(PTR, parse_args(String[]); testsuite, tests,
+                      stdout=io, stderr=io, memory_interval=0.1, memory_thresholds=never)
+        str = String(take!(io))
+        @test contains(str, "SUCCESS")
+        @test !contains(str, "Memory pressure")
+
+        # the public entry point accepts the keyword
+        io = IOBuffer()
+        runtests(PTR, String[]; testsuite=Dict("quick" => :(@test true)), stdout=io, stderr=io,
+                 monitor_memory=true)
+        @test contains(String(take!(io)), "SUCCESS")
+    else
+        # accepted but inert on other platforms
+        io = IOBuffer()
+        PTR._runtests(PTR, parse_args(["--verbose"]); testsuite, tests,
+                      stdout=io, stderr=io, monitor_memory=true, memory_interval=0.1)
+        str = String(take!(io))
+        @test contains(str, "SUCCESS")
+        @test !contains(str, "Memory pressure")
+    end
+end
+
 @testset "subdir use" begin
     d = @__DIR__
     testsuite = find_tests(d)

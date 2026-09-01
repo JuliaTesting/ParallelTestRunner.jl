@@ -335,24 +335,47 @@ function jltest {
 
 The default number of jobs is chosen from a single snapshot of available memory taken
 before the run starts. That snapshot cannot tell whether the machine later ends up
-thrashing once all workers are allocating. On macOS, the kernel's virtual memory
-counters can be sampled on a timer with
-[`start_memory_pressure_monitor`](@ref) to answer that question during the run.
+thrashing once all workers are allocating. On macOS, [`runtests`](@ref) therefore samples
+the kernel's virtual memory counters every 5 seconds while tests run (keyword
+`monitor_memory`, `true` by default). When a sample crosses one of the default
+thresholds, a warning line is printed between result rows:
 
-Each [`MemoryPressureReport`](@ref) covers the interval since the previous sample and
-carries the rates that matter for thrashing: compressor traffic (`compression_rate`,
-`decompression_rate`), swap traffic (`swapin_rate`, `swapout_rate`) and pageouts, plus
-the resident memory breakdown at the end of the interval. A report is marked
-`:contentious` as soon as any threshold in [`MemoryPressureThresholds`](@ref) is
-exceeded, with a human-readable reason for each. Reports arrive through a `Channel`, so
-the consumer decides what to do with them:
+```
+Memory pressure: contentious (compressor churn at 210.5 MiB/s, swap traffic at 12.0 MiB/s)
+...
+Memory pressure: back to normal
+```
+
+and if any sample was contentious, a summary is printed before the final test results:
+
+```
+Memory pressure was contentious in 14 of 52 samples. Consider lowering `--jobs=N`, moving large tests to `serial`, or lowering `max_worker_rss`.
+```
+
+The default thresholds treat any swap activity as contentious, and flag compressor
+churn or pageouts above 64 MiB/s, or available memory below 5% of physical memory.
+Pass `monitor_memory = false` to disable the sampling; on other platforms the keyword is
+accepted but has no effect.
+
+For anything beyond the built-in warnings, the same sampler is available directly.
+[`start_memory_pressure_monitor`](@ref) returns a monitor whose channel yields one
+[`MemoryPressureReport`](@ref) per interval, covering the time since the previous
+sample: compressor traffic (`compression_rate`, `decompression_rate`), swap traffic
+(`swapin_rate`, `swapout_rate`) and pageouts, plus the resident memory breakdown at the
+end of the interval. A report is marked `:contentious` as soon as any threshold in
+[`MemoryPressureThresholds`](@ref) is exceeded, with a human-readable reason for each.
+Reports arrive through a `Channel`, so the consumer decides what to do with them:
 
 ```julia
 using ParallelTestRunner
 using MyPackage
 
 if Sys.isapple()
-    monitor = ParallelTestRunner.start_memory_pressure_monitor(; interval = 2.0)
+    thresholds = ParallelTestRunner.MemoryPressureThresholds(;
+        compressor_churn_rate = 256 * 2^20,  # 256 MiB/s
+        available_fraction = 0.10,
+    )
+    monitor = ParallelTestRunner.start_memory_pressure_monitor(; interval = 2.0, thresholds)
     consumer = @async for report in monitor.channel
         if report.status === :contentious
             @warn "Memory pressure detected" reasons = report.reasons report
@@ -361,7 +384,8 @@ if Sys.isapple()
 end
 
 try
-    runtests(MyPackage, ARGS)
+    # the built-in monitor is redundant when running your own
+    runtests(MyPackage, ARGS; monitor_memory = false)
 finally
     if Sys.isapple()
         ParallelTestRunner.stop_memory_pressure_monitor(monitor)
@@ -371,21 +395,7 @@ end
 ```
 
 Stopping the monitor closes the channel once the last report has been delivered, so
-the consumer loop terminates on its own. If a run is flagged as contentious, the usual
-remedies are lowering `--jobs=N`, moving the largest tests to the `serial` list, or
-lowering `max_worker_rss` so bloated workers are recycled sooner.
-
-The default thresholds treat any swap activity as contentious, and flag compressor
-churn or pageouts above 64 MiB/s. They can be relaxed or tightened with keyword
-arguments to [`MemoryPressureThresholds`](@ref):
-
-```julia
-thresholds = ParallelTestRunner.MemoryPressureThresholds(;
-    compressor_churn_rate = 256 * 2^20,  # 256 MiB/s
-    available_fraction = 0.10,
-)
-monitor = ParallelTestRunner.start_memory_pressure_monitor(; interval = 5.0, thresholds)
-```
+the consumer loop terminates on its own.
 
 ## Best Practices
 
