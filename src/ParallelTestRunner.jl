@@ -524,6 +524,9 @@ available_memory() = Sys.free_memory()
 
 end
 
+# Just use Sys.EFFECTIVE_CPU_THREADS when min VERSION >= v"1.13". NOT public
+const default_cpu_threads = (@static isdefined(Sys, :effective_cpu_threads) ? Sys.effective_cpu_threads() : Sys.CPU_THREADS)
+
 # This is an internal function, not to be used by end users.  The keyword
 # arguments are only for testing purposes.
 """
@@ -531,7 +534,7 @@ end
 
 Determine default number of parallel jobs.
 """
-function default_njobs(; cpu_threads = Sys.CPU_THREADS, free_memory = available_memory())
+function default_njobs(; cpu_threads = default_cpu_threads, free_memory = available_memory())
     jobs = cpu_threads
     memory_jobs = Int64(free_memory) ÷ (2 * Int64(2)^30)
     return max(1, min(jobs, memory_jobs))
