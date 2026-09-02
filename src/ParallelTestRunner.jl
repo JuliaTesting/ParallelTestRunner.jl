@@ -1214,6 +1214,7 @@ function _runtests(mod::Module, args::ParsedArgs;
         isempty(running_snapshot) && return
         results_snapshot = @lock results copy(results[])
         completed = length(results_snapshot)
+        completed_names = Set(r.test for r in results_snapshot)
         total = length(tests)
 
         # line 1: empty line
@@ -1238,22 +1239,28 @@ function _runtests(mod::Module, args::ParsedArgs;
             σ = length(durations_done) > 1 ? std(durations_done) : 0.0
             est_per_test = μ + 0.5σ
 
-            est_remaining = 0.0
-            ## currently-running
-            for (test, start_time) in running_snapshot
-                elapsed = time() - start_time
-                duration = get(historical_durations, test, est_per_test)
-                est_remaining += max(0.0, duration - elapsed)
-            end
-            ## yet-to-run
+            parallel_remaining = 0.0
+            serial_remaining = 0.0
+            longest_remaining = 0.0
+            now = time()
             for test in tests
-                haskey(running_snapshot, test) && continue
-                # Test is in any completed test
-                any(r -> test == r.test, results_snapshot) && continue
-                est_remaining += get(historical_durations, test, est_per_test)
+                duration = get(historical_durations, test, est_per_test)
+                remaining = if haskey(running_snapshot, test)
+                    max(0.0, duration - (now - running_snapshot[test]))
+                elseif test in completed_names
+                    continue
+                else
+                    duration
+                end
+                if test in serial_tests
+                    serial_remaining += remaining
+                else
+                    parallel_remaining += remaining
+                end
+                longest_remaining = max(longest_remaining, remaining)
             end
 
-            eta_sec = est_remaining / jobs
+            eta_sec = max(serial_remaining + parallel_remaining / jobs, longest_remaining)
             eta_mins = round(Int, eta_sec / 60)
             line3 *= " │ ETA: ~$eta_mins min"
         end
