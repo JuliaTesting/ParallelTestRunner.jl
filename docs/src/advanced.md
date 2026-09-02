@@ -225,6 +225,12 @@ and a yellow one marks a result that may still be replaced.
     well together: recycling keeps one bad test from cascading onto its worker during the run,
     while retries give the tests that did fail a contention-free second chance.
 
+## Memory Pressure on macOS
+
+On memory-constrained macOS machines (notably CI runners), requesting more jobs than the default can make the test suite take much longer than expected, sometimes enough to time out the job.
+This often manifests as per-test init times (shown with `--verbose`) steadily increasing over the run, likely because macOS compresses memory under pressure and each garbage collection gets slower.
+Prefer the default `--jobs` value, which accounts for available memory, and lower the `JULIA_TEST_MAXRSS_MB` environment variable so that workers get recycled sooner. See [issue #124](https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/124) for more details.
+
 ## Custom Workers
 
 For tests that require specific environment variables or Julia flags, you can use the `test_worker` keyword argument to [`runtests`](@ref) to assign tests to custom workers:
@@ -356,3 +362,5 @@ function jltest {
 1. **Use `serial` for resource-intensive tests**: If a test allocates significant memory or uses exclusive hardware resources, mark it as serial rather than reducing `--jobs` globally. This keeps the rest of your suite running in parallel.
 
 1. **Only use `retries` for worker contention-related failures**: Not all intermittent failures are caused by parallel worker resource contention. Ensure you aren't masking real test failures when using this feature.
+
+1. **Don't request too many jobs on macOS**: tests can take much longer than expected; see [Memory Pressure on macOS](@ref).
