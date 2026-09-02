@@ -117,7 +117,8 @@ See [Serial Tests](@ref) in the advanced usage guide for details.
 
 ### Failure Recycling and Retries
 
-Workers are recycled when they crash or exceed the memory threshold.
+Workers are recycled when they crash, exceed the memory threshold, or when the time spent
+before a test (mostly garbage collection) becomes slower than starting a fresh worker.
 Additionally, [`runtests`](@ref) has two keyword arguments to further customize
 failure handling. Setting `recycle_on_failure=true` recycles a worker after any
 failed test, so a test that corrupts process-wide state cannot poison later tests,
@@ -130,6 +131,7 @@ See [Failure Handling](@ref) in the advanced usage guide for details.
 The test runner provides real-time output showing:
 - Test name and worker assignment, with the worker shown in yellow when it is about to be recycled
 - Execution time
+- Init time (with `--verbose`), i.e. the time spent before the test started, shown in yellow when it caused the worker to be recycled
 - GC time and percentage
 - Memory allocation
 - RSS (Resident Set Size) memory usage, shown in yellow once it exceeds the RSS threshold
