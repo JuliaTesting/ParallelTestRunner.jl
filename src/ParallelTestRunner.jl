@@ -1056,7 +1056,7 @@ function runtests(mod::Module, args::ParsedArgs;
     # list tests, if requested
     if args.list !== nothing
         println(stdout, "Available tests:")
-        for test in keys(testsuite)
+        for test in sort(collect(keys(testsuite)))
             println(stdout, " - $test")
         end
         exit(0)
