@@ -768,7 +768,7 @@ function parse_args(args; custom::Array{String} = String[])
             Usage: runtests.jl [--help] [--list] [--jobs=N] [TESTS...]
 
                --help             Show this text.
-               --list             List all available tests.
+               --list             List available tests alphabetically.
                --verbose          Print more information during testing.
                --quickfail        Fail the entire run as soon as a single test errored.
                --jobs=N           Launch `N` processes to perform tests."""
@@ -948,7 +948,8 @@ Several keyword arguments are also supported:
 ## Command Line Options
 
 - `--help`: Show usage information and exit
-- `--list`: List all available test files and exit
+- `--list`: List all available tests alphabetically and exit. Each entry shows the
+  test's historical duration, if known, and is marked with `×` and printed in red if its last run failed.
 - `--verbose`: Print more detailed information during test execution
 - `--quickfail`: Stop the entire test run as soon as any test fails
 - `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory)
@@ -1055,9 +1056,21 @@ function runtests(mod::Module, args::ParsedArgs;
 
     # list tests, if requested
     if args.list !== nothing
+        historical_durations, historical_failures = load_test_history(mod)
+        sorted_tests = sort(collect(keys(testsuite)))
+        name_align = isempty(sorted_tests) ? 0 : maximum(textwidth, sorted_tests)
+        duration_strs = Dict(
+            test => (haskey(historical_durations, test) ? @sprintf("(%.2fs)", historical_durations[test]) : "")
+            for test in sorted_tests
+        )
+        duration_align = isempty(duration_strs) ? 0 : maximum(textwidth, values(duration_strs))
         println(stdout, "Available tests:")
-        for test in keys(testsuite)
-            println(stdout, " - $test")
+        for test in sorted_tests
+            failed = test in historical_failures
+            bullet = failed ? "×" : "-"
+            face = failed ? :ptr_error : :ptr_default
+            line = rstrip(" $bullet $(rpad(test, name_align))  $(lpad(duration_strs[test], duration_align))")
+            println(stdout, styled"{$face:$line}")
         end
         exit(0)
     end
