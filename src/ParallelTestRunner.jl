@@ -768,7 +768,7 @@ function parse_args(args; custom::Array{String} = String[])
             Usage: runtests.jl [--help] [--list] [--jobs=N] [TESTS...]
 
                --help             Show this text.
-               --list             List all available tests.
+               --list             List available tests alphabetically.
                --verbose          Print more information during testing.
                --quickfail        Fail the entire run as soon as a single test errored.
                --jobs=N           Launch `N` processes to perform tests."""
@@ -948,7 +948,8 @@ Several keyword arguments are also supported:
 ## Command Line Options
 
 - `--help`: Show usage information and exit
-- `--list`: List all available test files and exit
+- `--list`: List all available tests alphabetically and exit. Each entry shows the
+  test's historical duration, if known, and is printed in red if its last run failed.
 - `--verbose`: Print more detailed information during test execution
 - `--quickfail`: Stop the entire test run as soon as any test fails
 - `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory)

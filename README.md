@@ -21,7 +21,7 @@ julia> ParallelTestRunner.runtests(ParallelTestRunner, ["--help"])
 Usage: runtests.jl [--help] [--list] [--jobs=N] [TESTS...]
 
    --help             Show this text.
-   --list             List all available tests.
+   --list             List available tests alphabetically.
    --verbose          Print more information during testing.
    --quickfail        Fail the entire run as soon as a single test errored.
    --jobs=N           Launch `N` processes to perform tests.
