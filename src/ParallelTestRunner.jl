@@ -1214,6 +1214,7 @@ function _runtests(mod::Module, args::ParsedArgs;
         isempty(running_snapshot) && return
         results_snapshot = @lock results copy(results[])
         completed = length(results_snapshot)
+        completed_names = Set(r.test for r in results_snapshot)
         total = length(tests)
 
         # line 1: empty line
@@ -1253,8 +1254,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             ## yet-to-run
             for test in tests
                 haskey(running_snapshot, test) && continue
-                # Test is in any completed test
-                any(r -> test == r.test, results_snapshot) && continue
+                test in completed_names && continue
                 duration = get(historical_durations, test, est_per_test)
                 est_remaining += duration
                 longest_remaining = max(longest_remaining, duration)
