@@ -66,7 +66,7 @@ julia --project test/runtests.jl [OPTIONS] [TESTS...]
 
 - `--help`: Show usage information and exit
 - `--list`: List all available tests alphabetically and exit. Each entry shows the
-  test's historical duration, if known, and is printed in red if its last run failed.
+  test's historical duration, if known, and is marked with `×` and printed in red if its last run failed.
 - `--verbose`: Print more detailed information during test execution (including start times for each test)
 - `--quickfail`: Stop the entire test run as soon as any test fails
 - `--jobs=N`: Use `N` worker processes (default: based on CPU threads and available memory)

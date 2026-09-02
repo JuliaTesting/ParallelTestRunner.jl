@@ -949,7 +949,7 @@ Several keyword arguments are also supported:
 
 - `--help`: Show usage information and exit
 - `--list`: List all available tests alphabetically and exit. Each entry shows the
-  test's historical duration, if known, and is printed in red if its last run failed.
+  test's historical duration, if known, and is marked with `×` and printed in red if its last run failed.
 - `--verbose`: Print more detailed information during test execution
 - `--quickfail`: Stop the entire test run as soon as any test fails
 - `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory)
@@ -1066,8 +1066,10 @@ function runtests(mod::Module, args::ParsedArgs;
         duration_align = isempty(duration_strs) ? 0 : maximum(textwidth, values(duration_strs))
         println(stdout, "Available tests:")
         for test in sorted_tests
-            line = rstrip(" - $(rpad(test, name_align))  $(lpad(duration_strs[test], duration_align))")
-            face = test in historical_failures ? :ptr_error : :ptr_default
+            failed = test in historical_failures
+            bullet = failed ? "×" : "-"
+            face = failed ? :ptr_error : :ptr_default
+            line = rstrip(" $bullet $(rpad(test, name_align))  $(lpad(duration_strs[test], duration_align))")
             println(stdout, styled"{$face:$line}")
         end
         exit(0)
