@@ -1239,9 +1239,8 @@ function _runtests(mod::Module, args::ParsedArgs;
             σ = length(durations_done) > 1 ? std(durations_done) : 0.0
             est_per_test = μ + 0.5σ
 
-            est_remaining = 0.0
-            # a single long test can't be split across workers, so the longest
-            # remaining test is a lower bound on the ETA
+            parallel_remaining = 0.0
+            serial_remaining = 0.0
             longest_remaining = 0.0
             now = time()
             for test in tests
@@ -1253,11 +1252,15 @@ function _runtests(mod::Module, args::ParsedArgs;
                 else
                     duration
                 end
-                est_remaining += remaining
+                if test in serial_tests
+                    serial_remaining += remaining
+                else
+                    parallel_remaining += remaining
+                end
                 longest_remaining = max(longest_remaining, remaining)
             end
 
-            eta_sec = max(est_remaining / jobs, longest_remaining)
+            eta_sec = max(serial_remaining + parallel_remaining / jobs, longest_remaining)
             eta_mins = round(Int, eta_sec / 60)
             line3 *= " │ ETA: ~$eta_mins min"
         end
