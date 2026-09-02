@@ -363,4 +363,4 @@ function jltest {
 
 1. **Only use `retries` for worker contention-related failures**: Not all intermittent failures are caused by parallel worker resource contention. Ensure you aren't masking real test failures when using this feature.
 
-1. **Don't request too many jobs on macOS**: tests can take much longer than expected; see [Memory Pressure on macOS](@ref).
+1. **Don't request too many jobs on low-memory macOS machines**: tests can take much longer than expected; see [Memory Pressure on macOS](@ref).
