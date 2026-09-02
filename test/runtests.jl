@@ -1013,6 +1013,48 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "--list output" begin
+    # `--list` exits the process, so it has to run in a subprocess
+    mod = Module(:ListOutputTest)
+    history_file = ParallelTestRunner.get_history_file(mod)
+    function list_output(args)
+        code = """
+            using ParallelTestRunner
+            testsuite = Dict(name => :(@test true) for name in ("beta", "alpha", "gamma_longer"))
+            runtests(Module(:ListOutputTest), $(repr(args)); testsuite)
+            """
+        cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) -e $code`
+        split(chomp(read(cmd, String)), '\n')
+    end
+
+    rm(history_file; force=true)
+    @test list_output(["--list"]) == [
+        "Available tests:",
+        " - alpha",
+        " - beta",
+        " - gamma_longer",
+    ]
+    # positional filters are ignored
+    @test list_output(["--list", "alpha"]) == [
+        "Available tests:",
+        " - alpha",
+        " - beta",
+        " - gamma_longer",
+    ]
+
+    ParallelTestRunner.save_test_history(mod, (Dict("alpha" => 1.234, "gamma_longer" => 123.456), Set(["gamma_longer"])))
+    try
+        @test list_output(["--list"]) == [
+            "Available tests:",
+            " - alpha           (1.23s)",
+            " - beta",
+            "\e[31m × gamma_longer  (123.46s)\e[39m",
+        ]
+    finally
+        rm(history_file; force=true)
+    end
+end
+
 @testset "addworkers" begin
     workers = addworkers(2)
     @test length(workers) == 2
