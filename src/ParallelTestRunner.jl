@@ -1239,21 +1239,28 @@ function _runtests(mod::Module, args::ParsedArgs;
             est_per_test = μ + 0.5σ
 
             est_remaining = 0.0
+            # a single long test can't be split across workers, so the longest
+            # remaining test is a lower bound on the ETA
+            longest_remaining = 0.0
             ## currently-running
             for (test, start_time) in running_snapshot
                 elapsed = time() - start_time
                 duration = get(historical_durations, test, est_per_test)
-                est_remaining += max(0.0, duration - elapsed)
+                remaining = max(0.0, duration - elapsed)
+                est_remaining += remaining
+                longest_remaining = max(longest_remaining, remaining)
             end
             ## yet-to-run
             for test in tests
                 haskey(running_snapshot, test) && continue
                 # Test is in any completed test
                 any(r -> test == r.test, results_snapshot) && continue
-                est_remaining += get(historical_durations, test, est_per_test)
+                duration = get(historical_durations, test, est_per_test)
+                est_remaining += duration
+                longest_remaining = max(longest_remaining, duration)
             end
 
-            eta_sec = est_remaining / jobs
+            eta_sec = max(est_remaining / jobs, longest_remaining)
             eta_mins = round(Int, eta_sec / 60)
             line3 *= " │ ETA: ~$eta_mins min"
         end
