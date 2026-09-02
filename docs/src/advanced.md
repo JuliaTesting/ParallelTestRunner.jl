@@ -228,7 +228,7 @@ and a yellow one marks a result that may still be replaced.
 ## Memory Pressure on macOS
 
 On memory-constrained macOS machines (notably CI runners), requesting more jobs than the default can make the test suite take much longer than expected, sometimes enough to time out the job.
-This often manifests as per-test init times (shown with `--verbose`) steadily increasing over the run, likely because macOS compresses memory under pressure and each garbage collection gets slower.
+This often manifests as per-test init times (shown with `--verbose`) steadily increasing over the run, likely because macOS compresses memory under pressure and each garbage collection gets slower. GC % being higer than usual can also be an indication that you're requesting too many jobs or that the max RSS threshold is too high.
 Prefer the default `--jobs` value, which accounts for available memory, and lower the `JULIA_TEST_MAXRSS_MB` environment variable so that workers get recycled sooner. See [issue #124](https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/124) for more details.
 
 ## Custom Workers
