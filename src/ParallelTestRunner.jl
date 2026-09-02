@@ -1056,13 +1056,18 @@ function runtests(mod::Module, args::ParsedArgs;
     # list tests, if requested
     if args.list !== nothing
         historical_durations, historical_failures = load_test_history(mod)
+        sorted_tests = sort(collect(keys(testsuite)))
+        name_align = isempty(sorted_tests) ? 0 : maximum(textwidth, sorted_tests)
+        duration_strs = Dict(
+            test => (haskey(historical_durations, test) ? @sprintf("(%.2fs)", historical_durations[test]) : "")
+            for test in sorted_tests
+        )
+        duration_align = isempty(duration_strs) ? 0 : maximum(textwidth, values(duration_strs))
         println(stdout, "Available tests:")
-        for test in sort(collect(keys(testsuite)))
-            line = " - $test"
-            duration = get(historical_durations, test, nothing)
-            duration !== nothing && (line *= @sprintf(" (%.2fs)", duration))
-            test in historical_failures && (line *= " [failed]")
-            println(stdout, line)
+        for test in sorted_tests
+            line = rstrip(" - $(rpad(test, name_align))  $(lpad(duration_strs[test], duration_align))")
+            face = test in historical_failures ? :ptr_error : :ptr_default
+            println(stdout, styled"{$face:$line}")
         end
         exit(0)
     end
