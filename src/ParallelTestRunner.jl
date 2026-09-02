@@ -1055,9 +1055,14 @@ function runtests(mod::Module, args::ParsedArgs;
 
     # list tests, if requested
     if args.list !== nothing
+        historical_durations, historical_failures = load_test_history(mod)
         println(stdout, "Available tests:")
         for test in sort(collect(keys(testsuite)))
-            println(stdout, " - $test")
+            line = " - $test"
+            duration = get(historical_durations, test, nothing)
+            duration !== nothing && (line *= @sprintf(" (%.2fs)", duration))
+            test in historical_failures && (line *= " [failed]")
+            println(stdout, line)
         end
         exit(0)
     end
