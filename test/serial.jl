@@ -51,7 +51,6 @@
                                    init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
                                    serial=["serial_1", "serial_2", "serial_3"])
         str = String(take!(io))
-        println(str)
         @test contains(str, "Running 6 tests using 2 parallel jobs")
         @test contains(str, "3 serial test(s) will run before")
         @test contains(str, "SUCCESS")
@@ -82,7 +81,6 @@
                                    init_code=:(include($(joinpath(@__DIR__, "utils.jl")))),
                                    serial=["serial_1", "serial_2", "serial_3"], serial_position=:after)
         str = String(take!(io))
-        println(str)
         @test contains(str, "Running 6 tests using 2 parallel jobs")
         @test contains(str, "3 serial test(s) will run after")
         @test contains(str, "SUCCESS")
@@ -110,7 +108,6 @@
                  testsuite, stdout=io, stderr=io,
                  serial=["a", "b", "c", "d"])
         str = String(take!(io))
-        println(str)
         @test contains(str, "Running 4 tests using 1 parallel jobs")
         @test contains(str, "4 serial test(s) will run before")
         @test contains(str, "SUCCESS")
@@ -126,7 +123,6 @@
         runtests(ParallelTestRunner, ["--jobs=2"]; testsuite, stdout=io, stderr=io,
                  serial=String[])
         str = String(take!(io))
-        println(str)
         @test !contains(str, "serial")
         @test contains(str, "SUCCESS")
     end
@@ -143,7 +139,6 @@
         runtests(ParallelTestRunner, ["--jobs=3"]; testsuite, stdout=io, stderr=io,
                  serial=["s1", "s2"])
         str = String(take!(io))
-        println(str)
         # We have 4 total tests, requested 3 jobs, but only 2 tests are run in parallel, so
         # 2 is the maximum parallelism we expect, and the number of new workers we spawn.
         @test contains(str, "Running 4 tests using 2 parallel jobs")
@@ -163,7 +158,6 @@
         runtests(ParallelTestRunner, ["unit"]; testsuite, stdout=io, stderr=io,
                  serial=["unit/a", "integration/c"])
         str = String(take!(io))
-        println(str)
         @test contains(str, "Running 2 tests")
         @test contains(str, "1 serial test(s)")
         @test contains(str, "SUCCESS")
@@ -197,7 +191,6 @@
                      serial=["s1", "s2", "s3", "s4"])
         end
         str = String(take!(io))
-        println(str)
         @test contains(str, "Running 6 tests using 2 parallel jobs")
         @test contains(str, "4 serial test(s)")
         @test contains(str, "FAILURE")
@@ -230,7 +223,6 @@
             )
         end
         str = String(take!(io))
-        println(str)
         @test contains(str, "3 serial test(s) will run before")
         @test contains(str, r"fail-serial .+ started at")
         @test contains(str, r"fail-serial .+ failed at")
@@ -266,7 +258,6 @@
             )
         end
         str = String(take!(io))
-        println(str)
         @test contains(str, "2 serial test(s) will run after")
         @test contains(str, r"fail-parallel .+ started at")
         @test contains(str, r"fail-parallel .+ failed at")
@@ -301,7 +292,6 @@
             )
         end
         str = String(take!(io))
-        println(str)
         @test contains(str, "3 serial test(s) will run after")
         # The parallel batch runs to completion before the serial phase starts.
         @test contains(str, r"pass-parallel1 .+ started at")
@@ -349,7 +339,6 @@
         )
 
         str = String(take!(io))
-        println(str)
         @test contains(str, "SUCCESS")
 
         # create a mapping of test names to the character offset of their start times (lower is earlier)
