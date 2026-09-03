@@ -105,6 +105,7 @@
             "failB" => :( @test false ),
         )
         io = IOBuffer()
+        old_id_counter = ParallelTestRunner.ID_COUNTER[]
         @test_throws Test.FallbackTestSetException begin
             ParallelTestRunner._runtests(
                 ParallelTestRunner, parse_args(["--jobs=1"]);
@@ -118,8 +119,11 @@
         str = String(take!(io))
         main, retry = split(str, "Retrying")
         ids(s) = [m[1] for m in eachmatch(r"fail[AB] +\((\d+)\)", s)]
-        # the main run reuses one worker: `recycle_on_failure` is off by default
+        # the main run reuses one worker across failures:
+        # `recycle_on_failure` is off by default
         @test length(ids(main)) == 2 && allequal(ids(main))
+        # 1 initial worker + 1 replacement per retried test
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 3
         # the retry round recycles after every non-pass, so each test gets its own worker
         @test length(ids(retry)) == 2 && allunique(ids(retry))
     end

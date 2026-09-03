@@ -197,9 +197,10 @@ end
 end
 
 @testset "recycle_on_failure" begin
-    # Call `_runtests` throughout, so that we can enforce a run order, and use a single job,
-    # so that all tests share the same pool slot: a test only gets a new worker if the
-    # previous one was recycled.
+    # Call `_runtests` so that we can enforce a run order, and use a single job, so that
+    # all tests share the same pool slot: a test only gets a new worker if the previous one
+    # was recycled. The default behaviour (workers reused across failures) is covered by
+    # the "failing retry does not reuse its worker" testset in `retries.jl`.
     testsuite = Dict(
         "fail1" => :( @test false ),
         "pass1" => :( @test true ),
@@ -208,43 +209,22 @@ end
     )
     tests = ["fail1", "pass1", "fail2", "pass2"]
 
-    @testset "workers are reused across failures by default" begin
-        io = IOBuffer()
-        old_id_counter = ParallelTestRunner.ID_COUNTER[]
-        @test_throws Test.FallbackTestSetException begin
-            ParallelTestRunner._runtests(
-                ParallelTestRunner, parse_args(["--jobs=1"]);
-                testsuite,
-                tests,
-                stdout=io,
-                stderr=io,
-            )
-        end
-        str = String(take!(io))
-        println(str)
-        @test contains(str, "FAILURE")
-        # A failing test does not recycle its worker, so a single one runs all four tests.
-        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 1
+    io = IOBuffer()
+    old_id_counter = ParallelTestRunner.ID_COUNTER[]
+    @test_throws Test.FallbackTestSetException begin
+        ParallelTestRunner._runtests(
+            ParallelTestRunner, parse_args(["--jobs=1"]);
+            testsuite,
+            tests,
+            stdout=io,
+            stderr=io,
+            recycle_on_failure=true,
+        )
     end
-
-    @testset "worker is recycled after a failed test" begin
-        io = IOBuffer()
-        old_id_counter = ParallelTestRunner.ID_COUNTER[]
-        @test_throws Test.FallbackTestSetException begin
-            ParallelTestRunner._runtests(
-                ParallelTestRunner, parse_args(["--jobs=1"]);
-                testsuite,
-                tests,
-                stdout=io,
-                stderr=io,
-                recycle_on_failure=true,
-            )
-        end
-        str = String(take!(io))
-        println(str)
-        @test contains(str, "FAILURE")
-        # `fail1` and `fail2` recycle their worker, so `pass1` and `pass2` each need a fresh
-        # one: 1 initial worker + 2 replacements.
-        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 3
-    end
+    str = String(take!(io))
+    println(str)
+    @test contains(str, "FAILURE")
+    # `fail1` and `fail2` recycle their worker, so `pass1` and `pass2` each need a fresh
+    # one: 1 initial worker + 2 replacements.
+    @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 3
 end
