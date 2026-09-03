@@ -20,11 +20,15 @@
                                           (["pass3"], :before),
                                           (["pass3"], :after))
         mktempdir() do dir
-            # On its retry, the flaky test checks it is the only worker left alive.
+            # On its retry, the flaky test checks it is the only worker left alive. Always
+            # record exactly one test, so that the result counts below hold on platforms
+            # where child processes cannot be counted.
             check_alone = quote
                 children = _count_child_pids($(getpid()))
                 if children >= 0
                     @test children == 1
+                else
+                    @test true
                 end
             end
             testsuite = Dict(

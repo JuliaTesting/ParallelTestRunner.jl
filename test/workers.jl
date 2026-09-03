@@ -125,12 +125,16 @@ end
         "t4" => :(),
         "t5" => :(),
         "t6" => quote
-            # Make this test run longer than the others so that it runs alone...
-            sleep(5)
-            children = _count_child_pids($(getpid()))
-            # ...then check there's only one worker still running. WARNING: this test may be
-            # flaky on very busy systems, if at this point some of the other tests are still
-            # running, hope for the best.
+            # Keep this test running until the other tests are done and their worker has
+            # been stopped, so that this one is the only worker left. A fixed sleep is not
+            # enough on slow machines, where each of the other tests takes seconds to init,
+            # so poll instead (with a generous timeout).
+            children = -1
+            for _ in 1:1200
+                children = _count_child_pids($(getpid()))
+                (children < 0 || children == 1) && break
+                sleep(0.1)
+            end
             if children >= 0
                 @test children == 1
             end
