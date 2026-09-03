@@ -226,3 +226,11 @@ end
     # one: 1 initial worker + 2 replacements.
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 3
 end
+
+# All workers must have been stopped once `runtests` returns.
+@testset "no workers running" begin
+    children = _count_child_pids()
+    if children >= 0
+        @test children == 0
+    end
+end

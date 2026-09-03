@@ -149,3 +149,11 @@ end
     @test contains(str, "Running 0 tests")
     @test contains(str, "SUCCESS")
 end
+
+# All workers must have been stopped once `runtests` returns.
+@testset "no workers running" begin
+    children = _count_child_pids()
+    if children >= 0
+        @test children == 0
+    end
+end
