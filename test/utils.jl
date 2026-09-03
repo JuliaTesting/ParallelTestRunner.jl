@@ -1,3 +1,18 @@
+# Helper macro to show output of tests in case they fail.  Useful for debugging.
+macro show_if_error(io, expr)
+    quote
+        try
+            @elapsed $(esc(expr))
+        catch
+            output = String(take!($(esc(io))))
+            printstyled(stderr, "Output of failed test >>>>>>>>>>>>>>>>>>>>\n", color=:red, bold=true)
+            println(stderr, output)
+            printstyled(stderr, "End of output <<<<<<<<<<<<<<<<<<<<<<<<<<<<\n", color=:red, bold=true)
+            rethrow()
+        end
+    end
+end
+
 # Count direct child processes of current process (for default-worker test).
 # Returns -1 if unsupported so the test can be skipped.
 function _count_child_pids(pid = getpid())
