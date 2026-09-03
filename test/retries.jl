@@ -11,31 +11,6 @@
         end
     end
 
-    @testset "failed test passing on retry is reported as passing" begin
-        mktempdir() do dir
-            testsuite = Dict(
-                "flaky" => flaky_test(joinpath(dir, "flaky")),
-                "passes" => :( @test true ),
-            )
-            io = IOBuffer()
-            @show_if_error io ParallelTestRunner._runtests(
-                ParallelTestRunner, parse_args(["--jobs=1"]);
-                testsuite,
-                tests=["flaky", "passes"],
-                stdout=io,
-                stderr=io,
-                retries=1,
-            )
-            str = String(take!(io))
-            # Only the failed test is retried, and its retried result is the one reported.
-            @test contains(str, "Retrying 1 failed test")
-            @test contains(str, "SUCCESS")
-            # Two results in total: the failed attempt of `flaky` was replaced by the
-            # retried one, rather than reported next to it.
-            @test contains(str, r"Overall +\| +2 +2 ")
-        end
-    end
-
     @testset "persistent failure is retried and reported once" begin
         testsuite = Dict(
             "always_fails" => :( @test false ),
@@ -60,10 +35,11 @@
         @test contains(str, r"always_fails +\| +1 +1 ")
     end
 
-    # `serial_position=:after` returns the live serial worker to the pool immediately
-    # before the retry phase, so it is the configuration where the "alone" invariant is
-    # easiest to break.
-    @testset "retried test runs alone (serial=$serial, $serial_position)" for
+    # A failed test passing on its retry must be reported as passing, and the retry must run
+    # alone. `serial_position=:after` returns the live serial worker to the pool
+    # immediately before the retry phase, so it is the configuration where the "alone"
+    # invariant is easiest to break.
+    @testset "retried test passes and runs alone (serial=$serial, $serial_position)" for
             (serial, serial_position) in ((String[], :before),
                                           (["pass3"], :before),
                                           (["pass3"], :after))
@@ -94,8 +70,13 @@
                 retries=1,
             )
             str = String(take!(io))
+            # Only the failed test is retried, and its retried result is the one reported.
+            @test contains(str, "Retrying 1 failed test")
             @test length(collect(eachmatch(r"failed", str))) == 2
             @test contains(str, "SUCCESS")
+            # Four results in total: the failed attempt of `flaky` was replaced by the
+            # retried one, rather than reported next to it.
+            @test contains(str, r"Overall +\| +4 +4 ")
         end
     end
 
