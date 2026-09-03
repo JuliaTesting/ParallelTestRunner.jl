@@ -26,6 +26,7 @@
     runtests(ParallelTestRunner, ["--verbose"]; test_worker, testsuite, stdout=io, stderr=io)
 
     str = String(take!(io))
+    println(str)
     @test contains(str, r"needs env var .+ started at")
     @test contains(str, r"doesn't need env var .+ started at")
     @test contains(str, r"threads/1 .+ started at")
@@ -54,6 +55,7 @@ end
              exename = `$(Base.julia_cmd()[1])`,  # trivial Cmd wrapping julia
              stdout = io, stderr = io)
     str = String(take!(io))
+    println(str)
     @test contains(str, "SUCCESS")
 end
 
@@ -96,6 +98,7 @@ end
     runtests(ParallelTestRunner, ["--verbose"]; test_worker, init_code, init_worker_code, testsuite, stdout=io, stderr=io)
 
     str = String(take!(io))
+    println(str)
     @test contains(str, r"needs env var .+ started at")
     @test contains(str, r"doesn't need env var .+ started at")
     @test contains(str, r"threads/1 .+ started at")
@@ -118,6 +121,7 @@ end
     njobs = 1
     runtests(ParallelTestRunner, ["--jobs=$(njobs)"]; testsuite, stdout=ioc, stderr=ioc)
     str = String(take!(io))
+    println(str)
     @test contains(str, "Running $(length(testsuite)) tests using $(njobs) parallel jobs")
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
 end
@@ -215,6 +219,7 @@ end
     io = IOBuffer()
     runtests(ParallelTestRunner, ["--jobs=2"]; testsuite, stdout=io, stderr=io)
     str = String(take!(io))
+    println(str)
     @test contains(str, "Running 4 tests using 2 parallel jobs")
     @test contains(str, "SUCCESS")
 end
@@ -230,6 +235,7 @@ end
     old_id_counter = ParallelTestRunner.ID_COUNTER[]
     runtests(ParallelTestRunner, ["--jobs=1"]; testsuite, stdout=io, stderr=io, max_worker_rss=0)
     str = String(take!(io))
+    println(str)
     @test contains(str, "SUCCESS")
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + length(testsuite)
 end
@@ -259,6 +265,7 @@ end
             )
         end
         str = String(take!(io))
+        println(str)
         @test contains(str, "FAILURE")
         # A failing test does not recycle its worker, so a single one runs all four tests.
         @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 1
@@ -278,6 +285,7 @@ end
             )
         end
         str = String(take!(io))
+        println(str)
         @test contains(str, "FAILURE")
         # `fail1` and `fail2` recycle their worker, so `pass1` and `pass2` each need a fresh
         # one: 1 initial worker + 2 replacements.
