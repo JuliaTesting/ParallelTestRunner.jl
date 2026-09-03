@@ -1,11 +1,19 @@
 @testset "custom worker" begin
+    # Custom workers are handled differently:
+    # <https://github.com/JuliaTesting/ParallelTestRunner.jl/pull/107#issuecomment-3980645143>.
+    # But we still want to make sure they're terminated at the end, so keep track of them.
+    procs = Base.Process[]
+    procs_lock = ReentrantLock()
     function test_worker(name)
-        if name == "needs env var"
-            return addworker(env = ["SPECIAL_ENV_VAR" => "42"])
+        wrkr = if name == "needs env var"
+            addworker(env = ["SPECIAL_ENV_VAR" => "42"])
         elseif name == "threads/2"
-            return addworker(exeflags = ["--threads=2"])
+            addworker(exeflags = ["--threads=2"])
+        else
+            return nothing
         end
-        return nothing
+        Base.@lock procs_lock push!(procs, wrkr.w.proc)
+        return wrkr
     end
     testsuite = Dict(
         "needs env var" => quote
@@ -32,6 +40,8 @@
     @test contains(str, r"threads/1 .+ started at")
     @test contains(str, r"threads/2 .+ started at")
     @test contains(str, "SUCCESS")
+    @test length(procs) == 2
+    @test all(!Base.process_running, procs)
 end
 
 @testset "global worker kwargs" begin
@@ -156,29 +166,6 @@ end
         @test after >= 0
         @test after == before
     end
-end
-
-# Custom workers are handled differently:
-# <https://github.com/JuliaTesting/ParallelTestRunner.jl/pull/107#issuecomment-3980645143>.
-# But we still want to make sure they're terminated at the end.
-@testset "custom workers stopped at end" begin
-    testsuite = Dict(
-        "a" => :(),
-        "b" => :(),
-        "c" => :(),
-        "d" => :(),
-        "e" => :(),
-        "f" => :(),
-    )
-    procs = Base.Process[]
-    procs_lock = ReentrantLock()
-    function test_worker(name)
-        wrkr = addworker()
-        Base.@lock procs_lock push!(procs, wrkr.w.proc)
-        return wrkr
-    end
-    runtests(ParallelTestRunner, String[]; test_worker, testsuite, stdout=devnull, stderr=devnull)
-    @test all(!Base.process_running, procs)
 end
 
 @testset "addworkers" begin
