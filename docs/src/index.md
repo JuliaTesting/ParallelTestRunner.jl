@@ -128,11 +128,11 @@ See [Failure Handling](@ref) in the advanced usage guide for details.
 ### Real-time Progress
 
 The test runner provides real-time output showing:
-- Test name and worker assignment
+- Test name and worker assignment, with the worker shown in yellow when it is about to be recycled
 - Execution time
 - GC time and percentage
 - Memory allocation
-- RSS (Resident Set Size) memory usage, shown in yellow once it exceeds the RSS threshold and the worker will be restarted
+- RSS (Resident Set Size) memory usage, shown in yellow once it exceeds the RSS threshold
 
 ### Graceful Interruption
 

@@ -183,6 +183,7 @@ struct TestIOContext
     alloc_align::Int
     rss_align::Int
     max_worker_rss::Int
+    recycled::Ref{Bool}
     nonpass_face::Ref{Symbol}
 end
 
@@ -198,7 +199,7 @@ function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lo
 
     return TestIOContext(
         stdout, stderr, color, verbose, lock, name_align, elapsed_align, compile_align, gc_align, percent_align,
-        alloc_align, rss_align, max_worker_rss, Ref(:ptr_error)
+        alloc_align, rss_align, max_worker_rss, Ref(false), Ref(:ptr_error)
     )
 end
 
@@ -242,6 +243,7 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
+        wrkr_face = ctx.recycled[] ? :ptr_warn : :ptr_default
 
         time_str = @sprintf("%7.2f", base.time)
         padded_time = lpad(time_str, ctx.elapsed_align, " ")
@@ -277,7 +279,7 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
         rss_str = @sprintf("%5.2f", mem_use / 2^20)
         padded_rss = lpad(rss_str, ctx.rss_align, " ")
 
-        out_str = styled"{ptr_default:$test$padded_wrkr │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n}"
+        out_str = styled"{ptr_default:$test{$wrkr_face:$padded_wrkr} │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n}"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -1292,7 +1294,7 @@ function _runtests(mod::Module, args::ParsedArgs;
 
     # Message types for the printer channel
     # (:started, test_name, worker_id)
-    # (:finished, test_name, worker_id, record)
+    # (:finished, test_name, worker_id, record, recycled)
     # (:crashed, test_name, worker_id, test_time)
     # (:retry, tests_n, retry_n)
     # (:nonpass_face, face)
@@ -1320,6 +1322,7 @@ function _runtests(mod::Module, args::ParsedArgs;
 
                     elseif msg_type === :finished
                         test_name, wrkr, record = msg[2], msg[3], msg[4]
+                        io_ctx.recycled[] = msg[5]
 
                         clear_status()
                         if anynonpass(record[])
@@ -1482,22 +1485,19 @@ function _runtests(mod::Module, args::ParsedArgs;
 
                           # act on the results
                           if result isa AbstractTestRecord
-                              put!(printer_channel, (:finished, test, worker_id(wrkr), result))
+                              # recycle a pool worker so future tests start with a smaller working
+                              # set, or so that a failing test that may have left the worker in a
+                              # bad state (e.g. a wedged GPU driver) cannot poison later tests
+                              # (custom workers are stopped after every test regardless)
+                              recycle = wrkr === p && (memory_usage(result) > max_worker_rss ||
+                                                       ((recycle_on_failure || retry_mode) && anynonpass(result[])))
+                              put!(printer_channel, (:finished, test, worker_id(wrkr), result, recycle))
                               if anynonpass(result[]) && args.quickfail !== nothing
                                   stop_work()
                                   return
                               end
 
-                              if memory_usage(result) > max_worker_rss
-                                  # the worker has reached the max-rss limit, recycle it
-                                  # so future tests start with a smaller working set
-                                  Malt.stop(wrkr)
-                              elseif (recycle_on_failure || retry_mode) && anynonpass(result[])
-                                  # a failing test may have left the worker in a bad state
-                                  # (e.g. a wedged GPU driver whose every later allocation
-                                  # fails); recycle it so future tests get a fresh process
-                                  Malt.stop(wrkr)
-                              end
+                              recycle && Malt.stop(wrkr)
                           else
                               # One of Malt.TerminatedWorkerException, Malt.RemoteException, or ErrorException
                               @assert result isa Exception
