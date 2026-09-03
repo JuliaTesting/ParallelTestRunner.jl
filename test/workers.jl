@@ -106,31 +106,11 @@ end
     @test contains(str, "SUCCESS")
 end
 
-@testset "reuse of workers" begin
-    testsuite = Dict(
-        "a" => :(),
-        "b" => :(),
-        "c" => :(),
-        "d" => :(),
-        "e" => :(),
-        "f" => :(),
-    )
-    io = IOBuffer()
-    ioc = IOContext(io, :color => true)
-    old_id_counter = ParallelTestRunner.ID_COUNTER[]
-    njobs = 1
-    runtests(ParallelTestRunner, ["--jobs=$(njobs)"]; testsuite, stdout=ioc, stderr=ioc)
-    str = String(take!(io))
-    println(str)
-    @test contains(str, "Running $(length(testsuite)) tests using $(njobs) parallel jobs")
-    @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
-end
-
-
 # Issue <https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/106>.
-@testset "default workers stopped at end" begin
+@testset "default workers reused and stopped at end" begin
     # Use default workers (no test_worker) so the framework creates and should stop them.
-    # More tests than workers so some tasks finish early and must stop their worker.
+    # More tests than workers so that workers are reused, and so that some tasks finish
+    # early and must stop their worker.
     testsuite = Dict(
         "t1" => :(),
         "t2" => :(),
@@ -150,18 +130,22 @@ end
         end,
     )
     before = _count_child_pids()
+    old_id_counter = ParallelTestRunner.ID_COUNTER[]
+    njobs = 2
+    io = IOBuffer()
+    ioc = IOContext(io, :color => true)
+    @show_if_error io runtests(ParallelTestRunner, ["--jobs=$(njobs)", "--verbose"];
+                               testsuite, stdout=ioc, stderr=ioc, init_code=:(include($(joinpath(@__DIR__, "utils.jl")))))
+    str = String(take!(io))
+    println(str)
+    @test contains(str, "Running $(length(testsuite)) tests using $(njobs) parallel jobs")
+    @test contains(str, "SUCCESS")
+    # Make sure we didn't spawn more workers than expected: the same workers ran all tests.
+    @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
     if before < 0
         # Counting child PIDs not supported on this platform
         @test_skip false
     else
-        old_id_counter = ParallelTestRunner.ID_COUNTER[]
-        njobs = 2
-        io = IOBuffer()
-        ioc = IOContext(io, :color => true)
-        @show_if_error io runtests(ParallelTestRunner, ["--jobs=$(njobs)", "--verbose"];
-                                   testsuite, stdout=ioc, stderr=ioc, init_code=:(include($(joinpath(@__DIR__, "utils.jl")))))
-        # Make sure we didn't spawn more workers than expected.
-        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
         # Allow a moment for worker processes to exit
         for _ in 1:50
             sleep(0.1)
@@ -207,21 +191,6 @@ end
     end
     sleep(0.5)
     @test all(w -> !Base.process_running(w.w.proc), workers)
-end
-
-@testset "multiple tests multiple jobs" begin
-    testsuite = Dict(
-        "m1" => :( @test 1 + 1 == 2 ),
-        "m2" => :( @test 2 + 2 == 4 ),
-        "m3" => :( @test 3 + 3 == 6 ),
-        "m4" => :( @test 4 + 4 == 8 ),
-    )
-    io = IOBuffer()
-    runtests(ParallelTestRunner, ["--jobs=2"]; testsuite, stdout=io, stderr=io)
-    str = String(take!(io))
-    println(str)
-    @test contains(str, "Running 4 tests using 2 parallel jobs")
-    @test contains(str, "SUCCESS")
 end
 
 @testset "worker RSS recycling" begin
