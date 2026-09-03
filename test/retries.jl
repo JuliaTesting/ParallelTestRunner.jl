@@ -11,30 +11,6 @@
         end
     end
 
-    @testset "persistent failure is retried and reported once" begin
-        testsuite = Dict(
-            "always_fails" => :( @test false ),
-            "passes" => :( @test true ),
-        )
-        io = IOBuffer()
-        @test_throws Test.FallbackTestSetException begin
-            ParallelTestRunner._runtests(
-                ParallelTestRunner, parse_args(["--jobs=1"]);
-                testsuite,
-                tests=["always_fails", "passes"],
-                stdout=io,
-                stderr=io,
-                retries=2,
-            )
-        end
-        str = String(take!(io))
-        @test contains(str, "FAILURE")
-        # Both retry rounds run, and each of them fails again.
-        @test length(collect(eachmatch(r"always_fails.*failed", str))) == 3
-        # Despite the three attempts, the test is reported exactly once, as a failure.
-        @test contains(str, r"always_fails +\| +1 +1 ")
-    end
-
     # A failed test passing on its retry must be reported as passing, and the retry must run
     # alone. `serial_position=:after` returns the live serial worker to the pool
     # immediately before the retry phase, so it is the configuration where the "alone"
@@ -80,10 +56,13 @@
         end
     end
 
-    @testset "failing retry does not reuse its worker" begin
+    @testset "persistent failures are retried once per round, reported once, and do not reuse their worker" begin
+        # Use a single job, so that all tests share the same pool slot: a test only gets a
+        # new worker if the previous one was recycled.
         testsuite = Dict(
             "failA" => :( @test false ),
             "failB" => :( @test false ),
+            "passes" => :( @test true ),
         )
         io = IOBuffer()
         old_id_counter = ParallelTestRunner.ID_COUNTER[]
@@ -91,22 +70,32 @@
             ParallelTestRunner._runtests(
                 ParallelTestRunner, parse_args(["--jobs=1"]);
                 testsuite,
-                tests=["failA", "failB"],
+                tests=["failA", "failB", "passes"],
                 stdout=io,
                 stderr=io,
-                retries=1,
+                retries=2,
             )
         end
         str = String(take!(io))
-        main, retry = split(str, "Retrying")
+        @test contains(str, "FAILURE")
+        # Only the failed tests are retried, in both rounds, and each of them fails again.
+        @test count("Retrying 2 failed tests", str) == 2
+        @test length(collect(eachmatch(r"failA.*failed", str))) == 3
+        # Despite the three attempts, each test is reported exactly once, as a failure.
+        @test contains(str, r"failA +\| +1 +1 ")
+        @test contains(str, r"failB +\| +1 +1 ")
+
+        main, retry1, retry2 = split(str, "Retrying")
         ids(s) = [m[1] for m in eachmatch(r"fail[AB] +\((\d+)\)", s)]
         # the main run reuses one worker across failures:
         # `recycle_on_failure` is off by default
         @test length(ids(main)) == 2 && allequal(ids(main))
-        # 1 initial worker + 1 replacement per retried test
-        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 3
-        # the retry round recycles after every non-pass, so each test gets its own worker
-        @test length(ids(retry)) == 2 && allunique(ids(retry))
+        # the retry rounds recycle after every non-pass, so each attempt gets its own worker
+        retry_ids = vcat(ids(retry1), ids(retry2))
+        @test length(retry_ids) == 4 && allunique(retry_ids)
+        @test ids(main)[1] ∉ retry_ids
+        # 1 initial worker + 1 replacement per retried attempt
+        @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 5
     end
 
     @testset "no retries by default" begin
