@@ -39,6 +39,15 @@ end
     @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 32) == 2
     @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 33) == 4
     @test ParallelTestRunner.default_njobs(; cpu_threads=4, free_memory=UInt64(2) ^ 34) == 4
+
+    # Make sure default number of jobs can be controlled by `JULIA_CPU_THREADS`.
+    for nthreads in 1:ParallelTestRunner.default_njobs()
+        default_threads = readchomp(addenv(
+            `$(Base.julia_cmd()) --project=$(Base.active_project()) --compile=min -O0 --startup-file=no -E 'using ParallelTestRunner; ParallelTestRunner.default_njobs()'`,
+            "JULIA_CPU_THREADS" => nthreads,
+        ))
+        @test default_threads == string(nthreads)
+    end
 end
 
 @testset "subdir use" begin
