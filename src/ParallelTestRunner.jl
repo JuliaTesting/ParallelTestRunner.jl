@@ -530,13 +530,13 @@ end
 # number of jobs on memory-constrained machines (e.g. many cores but little
 # memory). Packages whose tests are heavier can pass a larger
 # `memory_per_worker` to `runtests`.
-const DEFAULT_MEMORY_PER_WORKER = Int64(2)^30
+const DEFAULT_MEMORY_PER_WORKER = 2 * Int64(2)^30
 
 # This is an internal function, not to be used by end users.  The
 # `_cpu_threads` and `_free_memory` keyword arguments are only for testing
 # purposes.
 """
-    default_njobs(; memory_per_worker = 2^30)
+    default_njobs(; memory_per_worker = 2*2^30)
 
 Determine default number of parallel jobs: the number of CPU threads, clamped
 such that each worker can be assumed to use `memory_per_worker` bytes of the
@@ -904,7 +904,7 @@ end
              stdout = Base.stdout,
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss(),
-             memory_per_worker = 2^30)
+             memory_per_worker = 2*2^30)
              serial = String[],
              serial_position::Symbol = :before,
              recycle_on_failure::Bool = false,
@@ -952,8 +952,8 @@ Several keyword arguments are also supported:
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
 - `memory_per_worker`: Assumed memory footprint (in bytes) of a single worker, used to
-  clamp the default number of jobs on memory-constrained machines (default: 1 GiB).
-  Packages whose tests use a lot of memory can pass a larger value to reduce the default
+  clamp the default number of jobs on memory-constrained machines (default: 2 GiB).
+  Packages whose tests use less memory can pass a smaller value to increase the default
   parallelism. Ignored when the number of jobs is set explicitly via `--jobs=N` or the
   `PARALLELTESTRUNNER_NUM_JOBS` environment variable.
 - `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time

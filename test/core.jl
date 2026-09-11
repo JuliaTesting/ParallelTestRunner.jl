@@ -35,19 +35,22 @@ end
 @testset "default njobs" begin
     @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 28) == 1
     @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 30) == 1
-    @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 31) == 2
-    @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32) == 4
+    @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 31) == 1
+    @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32) == 2
     @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 33) == 4
     @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 34) == 4
 
-    # memory jobs are rounded, not floored (a 7 GB CI runner with ~3.3 GiB
-    # available should still get 3 workers)
-    @test ParallelTestRunner.default_njobs(; _cpu_threads=3, _free_memory=round(UInt64, 3.3 * 2^30)) == 3
-    @test ParallelTestRunner.default_njobs(; _cpu_threads=3, _free_memory=round(UInt64, 2.7 * 2^30)) == 3
+    # memory jobs are rounded, not floored
+    @test ParallelTestRunner.default_njobs(; _cpu_threads=3, _free_memory=round(UInt64, 6.3 * 2^30)) == 3
+    @test ParallelTestRunner.default_njobs(; _cpu_threads=3, _free_memory=round(UInt64, 5.7 * 2^30)) == 3
 
     # heavier per-worker memory estimate lowers the default
     @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
-                                             memory_per_worker=2 * Int64(2) ^ 30) == 2
+                                             memory_per_worker=3 * Int64(2) ^ 30) == 1
+
+    # lighter per-worker memory estimate increases the default
+    @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
+                                             memory_per_worker=1 * Int64(2) ^ 30) == 4
 end
 
 @testset "number of jobs" begin
