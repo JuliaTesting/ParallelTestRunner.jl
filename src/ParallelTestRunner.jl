@@ -538,8 +538,8 @@ const DEFAULT_MEMORY_PER_WORKER = 2 * Int64(2)^30
 """
     default_njobs(; memory_per_worker = 2*2^30)
 
-Determine default number of parallel jobs: the number of CPU threads, clamped
-such that each worker can be assumed to use `memory_per_worker` bytes of the
+Determine default number of parallel jobs. Calculated as the number of CPU threads,
+clamped such that each worker can be assumed to use `memory_per_worker` bytes of the
 available system memory.
 """
 function default_njobs(;
