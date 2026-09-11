@@ -27,10 +27,10 @@ using MyPackage
 # Manually define your test suite
 testsuite = Dict(
     "basic" => quote
-        include("basic.jl")
+        include(joinpath(@__DIR__, "basic.jl"))
     end,
     "advanced" => quote
-        include("advanced.jl")
+        include(joinpath(@__DIR__, "advanced.jl"))
         @test 40 + 2 ≈ 42
     end
 )
@@ -51,7 +51,7 @@ using MyPackage
 
 # Start with autodiscovered tests
 cd(test_dir) do # hide
-testsuite = find_tests(pwd())
+testsuite = find_tests(@__DIR__)
 
 # Parse arguments
 args = parse_args(ARGS)
@@ -126,6 +126,110 @@ runtests(MyPackage, ARGS; init_worker_code, init_code)
 end # hide
 ```
 The `init_worker_code` is evaluated once per worker, so all definitions can be imported for use by the test module.
+
+## Serial Tests
+
+Some tests cannot safely run in parallel with other tests — for example, tests that allocate very large arrays and would exhaust memory if multiple ran simultaneously.
+The `serial` keyword argument to [`runtests`](@ref) lets you designate specific tests to run one at a time, while the remaining tests still run in parallel.
+
+```@example mypackage
+using ParallelTestRunner
+using MyPackage
+
+testsuite = Dict(
+    "big_alloc" => quote
+        # This test allocates ~4 GB and should not overlap with other tests
+        @test true
+    end,
+    "huge_matrix" => quote
+        @test true
+    end,
+    "fast_unit" => quote
+        @test 1 + 1 == 2
+    end,
+    "fast_integration" => quote
+        @test true
+    end,
+)
+
+# "big_alloc" and "huge_matrix" run one at a time; the rest run in parallel
+runtests(MyPackage, ["--verbose"]; testsuite, serial=["big_alloc", "huge_matrix"])
+```
+
+By default serial tests run **before** the parallel batch.
+Use `serial_position=:after` to run them after instead:
+
+```@example mypackage
+runtests(MyPackage, ["--verbose"]; testsuite, serial=["big_alloc", "huge_matrix"], serial_position=:after)
+```
+
+Serial tests participate in the same ordering logic as parallel tests (sorted by historical
+duration, longest first) and their results appear in the same overall summary.
+
+!!! tip
+    With automatic test discovery via [`find_tests`](@ref), the `serial` names are the same
+    keys that appear in the testsuite dictionary (e.g. `"subdir/memory_test"`).
+
+!!! note
+    If the user filters tests via positional arguments (e.g. `julia test/runtests.jl unit`),
+    any serial test names that were filtered out are silently removed from the serial list.
+
+## Failure Handling
+
+Both options described in this section are opt-in and default to off.
+
+### Recycling Workers after a Failure
+
+Workers are reused across tests, so a test that corrupts process-wide state — a wedged GPU driver whose every subsequent allocation fails, a global left in an inconsistent state, a library put in an unusable configuration — can make every later test scheduled on that same worker fail too.
+
+Setting `recycle_on_failure=true` stops the worker after any test that did not pass, so the next test gets a fresh process:
+
+```julia
+runtests(MyPackage, ARGS; recycle_on_failure=true)
+```
+
+This complements the existing recycling of workers exceeding `max_worker_rss` and of workers that crashed outright.
+
+### Retrying Failed Tests
+
+When several workers compete for a limited resource (usually memory), a failure can mean "lost the race for the resource" rather than "the code is broken".
+Such a test typically passes when run on its own.
+
+The `retries` keyword argument re-runs tests that did not pass, up to `N` times, after the main run has completed:
+
+```julia
+runtests(MyPackage, ARGS; retries=1)
+```
+
+Retried tests run **sequentially on a single fresh worker**, so a test that failed only because of concurrent resource pressure gets an otherwise-idle system.
+If a test fails again, its worker is stopped before the next retry, so one failure cannot contaminate the following one.
+
+Only the final attempt of each test is recorded in the results, so a test that passes on retry is reported as passing and a persistently broken test is reported as failing.
+Retries are visible in the output, so flakiness is surfaced rather than hidden:
+
+```
+Retrying 1 failed test  (1)
+fails      (8) │     0.05 │   failed at 2026-08-08T15:10:15.526
+```
+
+While a test still has an attempt left, its failure is printed in yellow, and the final
+attempt is printed in red. A red line therefore always marks the result that will be reported,
+and a yellow one marks a result that may still be replaced.
+
+!!! note
+    Retries are skipped when the run was interrupted (e.g. `Ctrl+C`) or when `--quickfail` is
+    in effect, since in both cases the run stopped early on purpose.
+
+!!! tip
+    `recycle_on_failure` and `retries` address different halves of the same problem and work
+    well together: recycling keeps one bad test from cascading onto its worker during the run,
+    while retries give the tests that did fail a contention-free second chance.
+
+## Memory Pressure on macOS
+
+On memory-constrained macOS machines (notably CI runners), requesting more jobs than the default can make the test suite take much longer than expected, sometimes enough to time out the job.
+This often manifests as per-test init times (shown with `--verbose`) steadily increasing over the run, likely because macOS compresses memory under pressure and each garbage collection gets slower. GC % being higer than usual can also be an indication that you're requesting too many jobs or that the max RSS threshold is too high.
+Prefer the default `--jobs` value, which accounts for available memory, and lower the `JULIA_TEST_MAXRSS_MB` environment variable so that workers get recycled sooner. See [issue #124](https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/124) for more details.
 
 ## Custom Workers
 
@@ -244,7 +348,7 @@ function jltest {
 1. **Handle platform differences**: Use conditional logic in your test suite setup to handle platform-specific tests:
 
    ```julia
-   testsuite = find_tests(pwd())
+   testsuite = find_tests(@__DIR__)
    if Sys.iswindows()
        delete!(testsuite, "unix_specific_test")
    end
@@ -254,3 +358,9 @@ function jltest {
    Having few long-running test files and other short-running ones hinders scalability.
 
 1. **Use custom workers sparingly**: Custom workers add overhead. Only use them when tests genuinely require different configurations.
+
+1. **Use `serial` for resource-intensive tests**: If a test allocates significant memory or uses exclusive hardware resources, mark it as serial rather than reducing `--jobs` globally. This keeps the rest of your suite running in parallel.
+
+1. **Only use `retries` for worker contention-related failures**: Not all intermittent failures are caused by parallel worker resource contention. Ensure you aren't masking real test failures when using this feature.
+
+1. **Don't request too many jobs on low-memory macOS machines**: tests can take much longer than expected; see [Memory Pressure on macOS](@ref).

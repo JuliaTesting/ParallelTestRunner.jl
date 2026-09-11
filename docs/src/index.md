@@ -65,11 +65,12 @@ julia --project test/runtests.jl [OPTIONS] [TESTS...]
 ### Available Options
 
 - `--help`: Show usage information and exit
-- `--list`: List all available test files and exit
+- `--list`: List all available tests alphabetically and exit. Each entry shows the
+  test's historical duration, if known, and is marked with `×` and printed in red if its last run failed.
 - `--verbose`: Print more detailed information during test execution (including start times for each test)
 - `--quickfail`: Stop the entire test run as soon as any test fails
 - `--jobs=N`: Use `N` worker processes (default: based on CPU threads and available memory)
-- `TESTS...`: Filter test files by name, matched using `startswith`
+- `TESTS...`: Filter test files by name, matched using `startswith`. Arguments starting with '!' will instead be excluded from the test selection.
 
 ### Examples
 
@@ -107,14 +108,31 @@ Pkg.test("MyPackage"; test_args=`--verbose --jobs=4 integration`)
 Tests run concurrently in isolated worker processes, each inside own module.
 `ParallelTestRunner` records historical tests duration for each package, so that in subsequent runs long-running tests are executed first, to improve load balancing.
 
+### Serial Test Support
+
+Certain tests (e.g. memory-hungry tests) may need to run one at a time.
+The `serial` keyword argument to [`runtests`](@ref) lets you designate specific tests
+for sequential execution, either before or after the parallel batch.
+See [Serial Tests](@ref) in the advanced usage guide for details.
+
+### Failure Recycling and Retries
+
+Workers are recycled when they crash or exceed the memory threshold.
+Additionally, [`runtests`](@ref) has two keyword arguments to further customize
+failure handling. Setting `recycle_on_failure=true` recycles a worker after any
+failed test, so a test that corrupts process-wide state cannot poison later tests,
+and `retries=N` re-runs failed tests sequentially up to `N` times to reduce false
+failures caused by resource contention.
+See [Failure Handling](@ref) in the advanced usage guide for details.
+
 ### Real-time Progress
 
 The test runner provides real-time output showing:
-- Test name and worker assignment
+- Test name and worker assignment, with the worker shown in yellow when it is about to be recycled
 - Execution time
 - GC time and percentage
 - Memory allocation
-- RSS (Resident Set Size) memory usage
+- RSS (Resident Set Size) memory usage, shown in yellow once it exceeds the RSS threshold
 
 ### Graceful Interruption
 
