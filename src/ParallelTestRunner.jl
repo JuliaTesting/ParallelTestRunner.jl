@@ -533,7 +533,7 @@ end
 const DEFAULT_MEMORY_PER_WORKER = Int64(2)^30
 
 # This is an internal function, not to be used by end users.  The
-# `cpu_threads` and `free_memory` keyword arguments are only for testing
+# `_cpu_threads` and `_free_memory` keyword arguments are only for testing
 # purposes.
 """
     default_njobs(; memory_per_worker = 2^30)
@@ -546,11 +546,11 @@ function default_njobs(;
         memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
         ## private arguments for testing only
         # Just use Sys.EFFECTIVE_CPU_THREADS when min VERSION >= v"1.13"
-        cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
-        free_memory = available_memory(),
+        _cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
+        _free_memory = available_memory(),
     )
-    memory_jobs = round(Int, Int64(free_memory) / memory_per_worker)
-    return max(1, min(cpu_threads, memory_jobs))
+    memory_jobs = round(Int, Int64(_free_memory) / memory_per_worker)
+    return max(1, min(_cpu_threads, memory_jobs))
 end
 
 # Struct used in runtests to sort failed tests before successful ones
