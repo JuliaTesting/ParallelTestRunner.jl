@@ -543,12 +543,13 @@ such that each worker can be assumed to use `memory_per_worker` bytes of the
 available system memory.
 """
 function default_njobs(;
+        memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
+        ## private arguments for testing only
         # Just use Sys.EFFECTIVE_CPU_THREADS when min VERSION >= v"1.13"
         cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
         free_memory = available_memory(),
-        memory_per_worker = DEFAULT_MEMORY_PER_WORKER
     )
-    memory_jobs = Int64(free_memory) ÷ (2 * Int64(2)^30)
+    memory_jobs = round(Int, Int64(free_memory) / memory_per_worker)
     return max(1, min(cpu_threads, memory_jobs))
 end
 
