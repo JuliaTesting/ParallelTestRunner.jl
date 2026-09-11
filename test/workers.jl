@@ -114,8 +114,8 @@ end
 end
 
 # Issue <https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/106>.
-# The cold init time of a worker varies between machines, so the "slow init warning"
-# testset below needs a measurement of it: rather than spending a worker on a
+# The cold init time of a worker varies between machines, so the "slow init warning and
+# recycling" testset below needs a measurement of it: rather than spending a worker on a
 # dedicated run, take it from the verbose output of the following testset.
 cold_init_time = Ref(NaN)
 
@@ -204,7 +204,7 @@ end
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + length(testsuite)
 end
 
-@testset "slow init warning" begin
+@testset "slow init warning and recycling" begin
     init_worker_code = :( const slow_init_counter = Ref(0) )
     args = ["--verbose", "--jobs=1"]
 
@@ -217,7 +217,7 @@ end
         cold_init_time[] = parse(Float64, match(r"^cold\s+\(\d+\) │\s+[\d.]+ │\s+([\d.]+) │"m, String(take!(io)))[1])
     end
 
-    # every test after the first on the worker is slow to init
+    # every test after the first on a worker is slow to init, so the worker gets recycled
     slow_init = ceil(Int, 1.5 * ParallelTestRunner.SLOW_INIT_FACTOR * cold_init_time[]) + 1
     init_code = quote
         Main.slow_init_counter[] += 1
@@ -230,12 +230,14 @@ end
     runtests(ParallelTestRunner, args; testsuite, init_worker_code, init_code, stdout=ioc, stderr=ioc)
     str = String(take!(io))
     @test contains(str, "SUCCESS")
-    # a slow init does not recycle the worker
-    @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 1
-    # both tests after the first are slow, but the warning is only printed once, and it is
-    # the only thing printed in yellow
+    # the slow init recycles the worker, so the last test has a cold init on a fresh one
+    @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 2
+    # only the recycled worker, its slow init and the warning are printed in yellow
     @test count("Warning:", str) == 1
-    @test count("\e[33m", str) == 1
+    @test count("\e[33m", str) == 3
+    @test contains(str, Regex("\\e\\[33m\\s*\\($(old_id_counter)\\)\\e\\[39m"))
+    @test contains(str, r"\e\[33m\s*\d+\.\d\d\e\[39m")
+    # the init time is printed in a nested face, so allow escape codes before it
     @test contains(str, r"Init time of `[abc]`")
 end
 
