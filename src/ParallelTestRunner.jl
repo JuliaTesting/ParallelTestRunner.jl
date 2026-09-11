@@ -160,6 +160,14 @@ function memory_usage(rec::AbstractTestRecord)
     return parent(rec).rss
 end
 
+function init_time(rec::AbstractTestRecord)
+    base = parent(rec)
+    return base.total_time - base.time
+end
+
+# the user is warned once a warm worker's init time exceeds this multiple of the cold-start cost
+const SLOW_INIT_FACTOR = 2
+
 function Base.getindex(rec::AbstractTestRecord)
     return parent(rec).value
 end
@@ -230,7 +238,9 @@ function print_test_started(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        out_str = styled"$(test)$padded_wrkr │{ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
+        # StyledStrings 1.0.3 (used on Julia 1.10) cannot print a styled string whose leading
+        # unstyled text ends in a multi-byte character (e.g. `│`), so style it explicitly
+        out_str = styled"{default:$(test)$padded_wrkr │}{ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -279,7 +289,8 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
         rss_str = @sprintf("%5.2f", mem_use / 2^20)
         padded_rss = lpad(rss_str, ctx.rss_align, " ")
 
-        out_str = styled"$test{$wrkr_face:$padded_wrkr} │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n"
+        # see `print_test_started` for why `test` is styled explicitly
+        out_str = styled"{default:$test}{$wrkr_face:$padded_wrkr} │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -1182,6 +1193,10 @@ function _runtests(mod::Module, args::ParsedArgs;
     t0 = time()
     results = Lockable([])
     running_tests = Lockable(Dict{String, Float64}())  # test => start_time
+    # init time of a test on a freshly spawned worker, i.e. the cost of recycling one
+    cold_init_time = Threads.Atomic{Float64}(Inf)
+    # the slow init warning is only printed once per run
+    slow_init_warned = Threads.Atomic{Bool}(false)
 
     worker_tasks = Task[]
 
@@ -1315,6 +1330,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     # Message types for the printer channel
     # (:started, test_name, worker_id)
     # (:finished, test_name, worker_id, record, recycled)
+    # (:slow_init, test_name, init_time, cold_init_time)
     # (:crashed, test_name, worker_id, test_time)
     # (:retry, tests_n, retry_n)
     # (:nonpass_face, face)
@@ -1349,6 +1365,22 @@ function _runtests(mod::Module, args::ParsedArgs;
                             print_test_failed(record, wrkr, test_name, io_ctx)
                         else
                             print_test_finished(record, wrkr, test_name, io_ctx)
+                        end
+
+                    elseif msg_type === :slow_init
+                        test_name, init_t, cold_t = msg[2], msg[3], msg[4]
+
+                        clear_status()
+                        lock(io_ctx.lock)
+                        try
+                            msg_str = styled"""
+                            {ptr_warn,bold:Warning:} {ptr_light:Init time of `$test_name` ({default:$(round(init_t; digits=2))s}) was much longer than usual ({default:$(round(cold_t; digits=2))s} on a freshly spawned worker).
+                            This usually means too many workers for the available memory; see the docs for more information.}
+                            """
+                            print(io_ctx.stderr, msg_str)
+                            flush(io_ctx.stderr)
+                        finally
+                            unlock(io_ctx.lock)
                         end
 
                     elseif msg_type === :crashed
@@ -1472,9 +1504,11 @@ function _runtests(mod::Module, args::ParsedArgs;
                               wrkr = p
                           end
                           # if a worker failed, spawn a new one
+                          fresh_worker = false
                           if wrkr === nothing || !Malt.isrunning(wrkr)
                               wrkr = p = addworker(; init_worker_code, io_ctx.color,
                                                    exename, exeflags, env)
+                              fresh_worker = true
                           end
 
                           # run the test
@@ -1505,6 +1539,13 @@ function _runtests(mod::Module, args::ParsedArgs;
 
                           # act on the results
                           if result isa AbstractTestRecord
+                              if fresh_worker
+                                  Threads.atomic_min!(cold_init_time, init_time(result))
+                              end
+                              # the pre-test full GC has become much slower than spawning a
+                              # new worker, which typically means there are too many workers
+                              # for the available memory (e.g. macOS memory pressure, #124)
+                              slow_init = wrkr === p && !fresh_worker && init_time(result) > SLOW_INIT_FACTOR * cold_init_time[]
                               # recycle a pool worker so future tests start with a smaller working
                               # set, or so that a failing test that may have left the worker in a
                               # bad state (e.g. a wedged GPU driver) cannot poison later tests
@@ -1512,6 +1553,9 @@ function _runtests(mod::Module, args::ParsedArgs;
                               recycle = wrkr === p && (memory_usage(result) > max_worker_rss ||
                                                        ((recycle_on_failure || retry_mode) && anynonpass(result[])))
                               put!(printer_channel, (:finished, test, worker_id(wrkr), result, recycle))
+                              if slow_init && !Threads.atomic_xchg!(slow_init_warned, true)
+                                  put!(printer_channel, (:slow_init, test, init_time(result), cold_init_time[]))
+                              end
                               if anynonpass(result[]) && args.quickfail !== nothing
                                   stop_work()
                                   return
