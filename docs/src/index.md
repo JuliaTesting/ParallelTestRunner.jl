@@ -130,6 +130,7 @@ See [Failure Handling](@ref) in the advanced usage guide for details.
 The test runner provides real-time output showing:
 - Test name and worker assignment, with the worker shown in yellow when it is about to be recycled
 - Execution time
+- Init time (with `--verbose`), i.e. the time spent before the test started
 - GC time and percentage
 - Memory allocation
 - RSS (Resident Set Size) memory usage, shown in yellow once it exceeds the RSS threshold
