@@ -114,6 +114,11 @@ end
 end
 
 # Issue <https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/106>.
+# The cold init time of a worker varies between machines, so the "slow init warning"
+# testset below needs a measurement of it: rather than spending a worker on a
+# dedicated run, take it from the verbose output of the following testset.
+cold_init_time = Ref(NaN)
+
 @testset "default workers reused and stopped at end" begin
     # Use default workers (no test_worker) so the framework creates and should stop them.
     # More tests than workers so that workers are reused, and so that some tasks finish
@@ -152,6 +157,10 @@ end
     @test contains(str, "SUCCESS")
     # Make sure we didn't spawn more workers than expected: the same workers ran all tests.
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + njobs
+    # The first test on each worker had a cold init: the slowest init is an upper bound.
+    init_times = [parse(Float64, m[1]) for m in eachmatch(r"^t\d\s+\(\d+\) │\s+[\d.]+ │\s+([\d.]+) │"m, str)]
+    @test length(init_times) == length(testsuite)
+    cold_init_time[] = maximum(init_times)
     if before < 0
         # Counting child PIDs not supported on this platform
         @test_skip false
@@ -193,6 +202,42 @@ end
     str = String(take!(io))
     @test contains(str, "SUCCESS")
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + length(testsuite)
+end
+
+@testset "slow init warning" begin
+    init_worker_code = :( const slow_init_counter = Ref(0) )
+    args = ["--verbose", "--jobs=1"]
+
+    # `cold_init_time` was measured by the "default workers reused and stopped at end"
+    # testset above; if that testset failed before recording it, measure it here instead
+    # so that this testset stays independent.
+    if isnan(cold_init_time[])
+        io = IOBuffer()
+        runtests(ParallelTestRunner, args; testsuite=Dict("cold" => :( @test true )), init_worker_code, stdout=io, stderr=io)
+        cold_init_time[] = parse(Float64, match(r"^cold\s+\(\d+\) │\s+[\d.]+ │\s+([\d.]+) │"m, String(take!(io)))[1])
+    end
+
+    # every test after the first on the worker is slow to init
+    slow_init = ceil(Int, 1.5 * ParallelTestRunner.SLOW_INIT_FACTOR * cold_init_time[]) + 1
+    init_code = quote
+        Main.slow_init_counter[] += 1
+        Main.slow_init_counter[] > 1 && sleep($slow_init)
+    end
+    testsuite = Dict("a" => :( @test true ), "b" => :( @test true ), "c" => :( @test true ))
+    io = IOBuffer()
+    ioc = IOContext(io, :color => true)
+    old_id_counter = ParallelTestRunner.ID_COUNTER[]
+    runtests(ParallelTestRunner, args; testsuite, init_worker_code, init_code, stdout=ioc, stderr=ioc)
+    str = String(take!(io))
+    @test contains(str, "SUCCESS")
+    # a slow init does not recycle the worker
+    @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 1
+    # both tests after the first are slow, but the warning is only printed once, and it is
+    # the only thing printed in yellow
+    @test count("Warning:", str) == 1
+    @test count("\e[33m", str) == 1
+    @test contains(str, r"pre-test time of `[abc]` \(\d+\.\d+s\) was much longer than usual")
+    @test contains(str, "JULIA_TEST_MAXRSS_MB")
 end
 
 @testset "recycle_on_failure" begin
