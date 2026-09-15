@@ -902,7 +902,7 @@ end
              stdout = Base.stdout,
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss(),
-             memory_per_worker = 2*2^30)
+             memory_per_worker = 2 * 2^30)
              serial = String[],
              serial_position::Symbol = :before,
              recycle_on_failure::Bool = false,
