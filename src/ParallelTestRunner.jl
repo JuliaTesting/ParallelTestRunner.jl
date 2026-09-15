@@ -165,7 +165,8 @@ function init_time(rec::AbstractTestRecord)
     return base.total_time - base.time
 end
 
-# the user is warned once a warm worker's init time exceeds this multiple of the cold-start cost
+# the user is warned and a warm worker is recycled once its init time exceeds this multiple
+# of the cold-start cost
 const SLOW_INIT_FACTOR = 2
 
 function Base.getindex(rec::AbstractTestRecord)
@@ -192,6 +193,7 @@ struct TestIOContext
     rss_align::Int
     max_worker_rss::Int
     recycled::Ref{Bool}
+    slow_init::Ref{Bool}
     nonpass_face::Ref{Symbol}
 end
 
@@ -207,7 +209,7 @@ function test_IOContext(::Type{<:AbstractTestRecord}, stdout::IO, stderr::IO, lo
 
     return TestIOContext(
         stdout, stderr, color, verbose, lock, name_align, elapsed_align, compile_align, gc_align, percent_align,
-        alloc_align, rss_align, max_worker_rss, Ref(false), Ref(:ptr_error)
+        alloc_align, rss_align, max_worker_rss, Ref(false), Ref(false), Ref(:ptr_error)
     )
 end
 
@@ -259,7 +261,9 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
         padded_init_time, padded_comp_time = if ctx.verbose
             # pre-testset time
             init_time_str = @sprintf("%7.2f", base.total_time - base.time)
-            init_time = lpad(init_time_str, ctx.elapsed_align, " ") * " │ "
+            init_face = ctx.slow_init[] ? :ptr_warn : :ptr_default
+            padded_init = lpad(init_time_str, ctx.elapsed_align, " ")
+            init_time = styled"{$init_face:$padded_init} │ "
 
             # compilation time
             comp_time = if VERSION >= v"1.11"
@@ -1306,7 +1310,7 @@ function _runtests(mod::Module, args::ParsedArgs;
 
     # Message types for the printer channel
     # (:started, test_name, worker_id)
-    # (:finished, test_name, worker_id, record, recycled)
+    # (:finished, test_name, worker_id, record, recycled, slow_init)
     # (:slow_init, test_name, init_time, cold_init_time)
     # (:crashed, test_name, worker_id, test_time)
     # (:retry, tests_n, retry_n)
@@ -1336,6 +1340,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                     elseif msg_type === :finished
                         test_name, wrkr, record = msg[2], msg[3], msg[4]
                         io_ctx.recycled[] = msg[5]
+                        io_ctx.slow_init[] = msg[6]
 
                         clear_status()
                         if anynonpass(record[])
@@ -1525,15 +1530,17 @@ function _runtests(mod::Module, args::ParsedArgs;
                               end
                               # the pre-test full GC has become much slower than spawning a
                               # new worker, which typically means there are too many workers
-                              # for the available memory (e.g. macOS memory pressure, #124)
+                              # for the available memory (e.g. macOS memory pressure, #124):
+                              # warn the user, and recycle the worker since that is now cheaper
+                              # than keeping its bloated heap
                               slow_init = wrkr === p && !fresh_worker && init_time(result) > SLOW_INIT_FACTOR * cold_init_time[]
                               # recycle a pool worker so future tests start with a smaller working
                               # set, or so that a failing test that may have left the worker in a
                               # bad state (e.g. a wedged GPU driver) cannot poison later tests
                               # (custom workers are stopped after every test regardless)
-                              recycle = wrkr === p && (memory_usage(result) > max_worker_rss ||
+                              recycle = wrkr === p && (memory_usage(result) > max_worker_rss || slow_init ||
                                                        ((recycle_on_failure || retry_mode) && anynonpass(result[])))
-                              put!(printer_channel, (:finished, test, worker_id(wrkr), result, recycle))
+                              put!(printer_channel, (:finished, test, worker_id(wrkr), result, recycle, slow_init))
                               if slow_init && !Threads.atomic_xchg!(slow_init_warned, true)
                                   put!(printer_channel, (:slow_init, test, init_time(result), cold_init_time[]))
                               end
