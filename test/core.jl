@@ -58,14 +58,14 @@ end
 
     # environment variable overrides the default
     io = IOBuffer()
-    withenv("PARALLELTESTRUNNER_NUM_JOBS" => "2") do
+    withenv("PTR_NUM_JOBS" => "2") do
         runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io)
     end
     @test contains(String(take!(io)), "using 2 parallel jobs")
 
     # --jobs takes precedence over the environment variable
     io = IOBuffer()
-    withenv("PARALLELTESTRUNNER_NUM_JOBS" => "2") do
+    withenv("PTR_NUM_JOBS" => "2") do
         runtests(ParallelTestRunner, ["--jobs=1"]; testsuite, stdout=io, stderr=io)
     end
     @test contains(String(take!(io)), "using 1 parallel jobs")

@@ -25,7 +25,7 @@ Usage: runtests.jl [--help] [--list] [--jobs=N] [TESTS...]
    --verbose          Print more information during testing.
    --quickfail        Fail the entire run as soon as a single test errored.
    --jobs=N           Launch `N` processes to perform tests. Can also be set
-                      with the PARALLELTESTRUNNER_NUM_JOBS environment
+                      with the PTR_NUM_JOBS environment
                       variable, with `--jobs=N` taking precedence.
 
    Remaining arguments filter the tests that will be executed.

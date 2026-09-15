@@ -782,7 +782,7 @@ function parse_args(args; custom::Array{String} = String[])
                --verbose          Print more information during testing.
                --quickfail        Fail the entire run as soon as a single test errored.
                --jobs=N           Launch `N` processes to perform tests. Can also be set
-                                  with the PARALLELTESTRUNNER_NUM_JOBS environment
+                                  with the PTR_NUM_JOBS environment
                                   variable, with `--jobs=N` taking precedence."""
 
         if !isempty(custom)
@@ -953,7 +953,7 @@ Several keyword arguments are also supported:
   clamp the default number of jobs on memory-constrained machines (default: 2 GiB).
   Packages whose tests use less memory can pass a smaller value to increase the default
   parallelism. Ignored when the number of jobs is set explicitly via `--jobs=N` or the
-  `PARALLELTESTRUNNER_NUM_JOBS` environment variable.
+  `PTR_NUM_JOBS` environment variable.
 - `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time
   instead of in parallel.
 - `serial_position`: When to run serial tests relative to the parallel batch.
@@ -971,7 +971,7 @@ Several keyword arguments are also supported:
 - `--verbose`: Print more detailed information during test execution
 - `--quickfail`: Stop the entire test run as soon as any test fails
 - `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory;
-  can also be set with the `PARALLELTESTRUNNER_NUM_JOBS` environment variable, with
+  can also be set with the `PTR_NUM_JOBS` environment variable, with
   `--jobs=N` taking precedence)
 - `TESTS...`: Filter test files by name, matched using `startswith`. Arguments starting with '!' will instead be excluded from the test selection.
 
@@ -1166,14 +1166,14 @@ function _runtests(mod::Module, args::ParsedArgs;
     serial_tests, parallel_tests = partition_tests(tests, serial)
 
     # determine parallelism
-    env_jobs = tryparse(Int, get(ENV, "PARALLELTESTRUNNER_NUM_JOBS", ""))
+    env_jobs = tryparse(Int, get(ENV, "PTR_NUM_JOBS", ""))
     _jobs = @something args.jobs env_jobs default_njobs(; memory_per_worker)
     jobs = clamp(_jobs, 1, max(1, length(parallel_tests)))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs
         put!(worker_pool, nothing)
     end
-    println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. To change the number of jobs, specify the `--jobs=N` argument to the tests, or set the `PARALLELTESTRUNNER_NUM_JOBS` environment variable.")
+    println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. To change the number of jobs, specify the `--jobs=N` argument to the tests, or set the `PTR_NUM_JOBS` environment variable.")
     if !isempty(serial_tests)
         println(stdout, "  $(length(serial_tests)) serial test(s) will run $(serial_position) the parallel batch.")
     end
