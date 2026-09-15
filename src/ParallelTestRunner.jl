@@ -549,7 +549,7 @@ function default_njobs(;
         _cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
         _free_memory = available_memory(),
     )
-    memory_jobs = round(Int, Int64(_free_memory) / memory_per_worker)
+    memory_jobs = Int64(_free_memory) ÷ memory_per_worker
     return max(1, min(_cpu_threads, memory_jobs))
 end
 
