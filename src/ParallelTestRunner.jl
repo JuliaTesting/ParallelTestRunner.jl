@@ -526,21 +526,29 @@ available_memory() = Sys.free_memory()
 
 end
 
-# This is an internal function, not to be used by end users.  The keyword
-# arguments are only for testing purposes.
-"""
-    default_njobs()
+# Assumed memory footprint of a single test worker, used to clamp the default
+# number of jobs on memory-constrained machines (e.g. many cores but little
+# memory). Packages whose tests are heavier can pass a larger
+# `memory_per_worker` to `runtests`.
+const DEFAULT_MEMORY_PER_WORKER = 2 * Int64(2)^30
 
-Determine default number of parallel jobs.
+"""
+    default_njobs(; memory_per_worker = 2 * 2^30,
+                    _cpu_threads = $(@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Symbol("Sys.EFFECTIVE_CPU_THREADS") : Symbol("Sys.CPU_THREADS")),
+                    _free_memory = ParallelTestRunner.available_memory())
+
+*Internal* function used to determine the default number of parallel jobs. Calculated as the number of CPU threads,
+clamped such that each worker can be assumed to use `memory_per_worker` bytes of the
+available system memory.
 """
 function default_njobs(;
+        memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
         # Just use Sys.EFFECTIVE_CPU_THREADS when min VERSION >= v"1.13"
-        cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
-        free_memory = available_memory(),
+        _cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
+        _free_memory = available_memory(),
     )
-    jobs = cpu_threads
-    memory_jobs = Int64(free_memory) ÷ (2 * Int64(2)^30)
-    return max(1, min(jobs, memory_jobs))
+    memory_jobs = Int64(_free_memory) ÷ memory_per_worker
+    return max(1, min(_cpu_threads, memory_jobs))
 end
 
 # Struct used in runtests to sort failed tests before successful ones
@@ -773,7 +781,9 @@ function parse_args(args; custom::Array{String} = String[])
                --list             List available tests alphabetically.
                --verbose          Print more information during testing.
                --quickfail        Fail the entire run as soon as a single test errored.
-               --jobs=N           Launch `N` processes to perform tests."""
+               --jobs=N           Launch `N` processes to perform tests. Can also be set
+                                  with the PTR_NUM_JOBS environment
+                                  variable, with `--jobs=N` taking precedence."""
 
         if !isempty(custom)
             usage *= "\n\nCustom arguments:"
@@ -892,6 +902,7 @@ end
              stdout = Base.stdout,
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss(),
+             memory_per_worker = 2 * 2^30)
              serial = String[],
              serial_position::Symbol = :before,
              recycle_on_failure::Bool = false,
@@ -938,6 +949,11 @@ Several keyword arguments are also supported:
   `test_worker` hook are the caller's responsibility.
 - `stdout` and `stderr`: I/O streams to write to (default: `Base.stdout` and `Base.stderr`)
 - `max_worker_rss`: RSS threshold where a worker will be restarted once it is reached.
+- `memory_per_worker`: Assumed memory footprint (in bytes) of a single worker, used to
+  clamp the default number of jobs on memory-constrained machines (default: 2 GiB).
+  Packages whose tests use less memory can pass a smaller value to increase the default
+  parallelism. Ignored when the number of jobs is set explicitly via `--jobs=N` or the
+  `PTR_NUM_JOBS` environment variable.
 - `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time
   instead of in parallel.
 - `serial_position`: When to run serial tests relative to the parallel batch.
@@ -954,7 +970,9 @@ Several keyword arguments are also supported:
   test's historical duration, if known, and is marked with `×` and printed in red if its last run failed.
 - `--verbose`: Print more detailed information during test execution
 - `--quickfail`: Stop the entire test run as soon as any test fails
-- `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory)
+- `--jobs=N`: Use N worker processes (default: based on CPU threads and available memory;
+  can also be set with the `PTR_NUM_JOBS` environment variable, with
+  `--jobs=N` taking precedence)
 - `TESTS...`: Filter test files by name, matched using `startswith`. Arguments starting with '!' will instead be excluded from the test selection.
 
 ## Behavior
@@ -1049,6 +1067,7 @@ function runtests(mod::Module, args::ParsedArgs;
                   stdout = Base.stdout,
                   stderr = Base.stderr,
                   max_worker_rss = get_max_worker_rss(),
+                  memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
                   recycle_on_failure::Bool = false,
                   retries::Integer = 0,
                   )
@@ -1113,6 +1132,7 @@ function runtests(mod::Module, args::ParsedArgs;
         stdout,
         stderr,
         max_worker_rss,
+        memory_per_worker,
         recycle_on_failure,
         retries,
     )
@@ -1137,6 +1157,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                    stdout = Base.stdout,
                    stderr = Base.stderr,
                    max_worker_rss = get_max_worker_rss(),
+                   memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
                    recycle_on_failure::Bool = false,
                    retries::Integer = 0,
                    )
@@ -1145,13 +1166,14 @@ function _runtests(mod::Module, args::ParsedArgs;
     serial_tests, parallel_tests = partition_tests(tests, serial)
 
     # determine parallelism
-    _jobs = something(args.jobs, default_njobs())
+    env_jobs = tryparse(Int, get(ENV, "PTR_NUM_JOBS", ""))
+    _jobs = @something args.jobs env_jobs default_njobs(; memory_per_worker)
     jobs = clamp(_jobs, 1, max(1, length(parallel_tests)))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs
         put!(worker_pool, nothing)
     end
-    println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. If this is too many concurrent jobs, specify the `--jobs=N` argument to the tests, or set the `JULIA_CPU_THREADS` environment variable.")
+    println(stdout, "Running $(length(tests)) tests using $jobs parallel jobs. To change the number of jobs, specify the `--jobs=N` argument to the tests, or set the `PTR_NUM_JOBS` environment variable.")
     if !isempty(serial_tests)
         println(stdout, "  $(length(serial_tests)) serial test(s) will run $(serial_position) the parallel batch.")
     end
