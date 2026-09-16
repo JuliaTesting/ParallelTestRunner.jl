@@ -227,23 +227,23 @@ and a yellow one marks a result that may still be replaced.
 
 ## Choosing the Number of Jobs
 
-By default, ParallelTestRunner.jl runs as many workers as there are CPU threads, clamped so that each worker can be assumed to use 2 GiB of the available system memory.
-The default can be overridden with the `--jobs=N` argument or the `PTR_NUM_JOBS` environment variable.
-
-More jobs is not always faster: each worker is a full Julia process, and once the machine runs out of memory the whole suite slows down, sometimes enough to time out a CI job.
-This has been a particular problem on memory-constrained macOS machines (notably CI runners), where macOS compresses memory under pressure and each garbage collection gets slower.
-It often manifests as per-test init times (shown with `--verbose`) steadily increasing over the run, and a higher-than-usual GC % can also be an indication that you're requesting too many jobs or that the max RSS threshold is too high.
-The runner prints a warning the first time a test's init time gets much longer than on a freshly spawned worker.
-When that happens, prefer the default `--jobs` value and lower the `JULIA_TEST_MAXRSS_MB` environment variable so that workers get recycled sooner. See [issue #124](https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/124) for more details.
-
-If the 2 GiB assumption does not fit your package, pass a different `memory_per_worker` (in bytes) to [`runtests`](@ref).
-Lightweight test suites can lower it to get more parallelism on machines with many cores but little memory, and memory-hungry ones can raise it to stay within budget:
+By default, ParallelTestRunner.jl runs with one worker per 2 GiB of available memory, capped by the number of effective CPU threads.
+For less demanding test suites, pass a smaller `memory_per_worker` (in bytes) to [`runtests`](@ref) to get more parallelism; for memory-hungry ones, pass a larger value.
+Since it only adjusts the default, the number of jobs still adapts to the memory of each machine running the tests.
 
 ```julia
-runtests(MyPackage, ARGS; memory_per_worker = 512 * 2^20)  # 512 MiB per worker
+runtests(MyPackage, ARGS; memory_per_worker = 2^30) # 1 GiB per worker
 ```
 
-`memory_per_worker` only affects the default; it is ignored when the number of jobs is set explicitly.
+Workers are recycled once they exceed the `JULIA_TEST_MAXRSS_MB` environment variable (or the `max_worker_rss` keyword).
+Lowering it keeps memory pressure in check, which can make it possible to run more workers than would otherwise be safe.
+
+The number of jobs can also be forced with `--jobs=N` or the `PTR_NUM_JOBS` environment variable, but this bypasses the memory check entirely.
+
+More jobs is not always faster: once the machine runs out of memory the whole suite slows down, sometimes enough to time out a CI job.
+This has been especially problematic on low-memory macOS machines (notably CI runners), where memory compression makes each garbage collection slower.
+If you notice per-test init times (shown with `--verbose`) steadily increasing over the run and/or a higher-than-usual GC %, it might be worth tweaking the job selection behaviour.
+See [issue #124](https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/124) for more details.
 
 ## Custom Workers
 
