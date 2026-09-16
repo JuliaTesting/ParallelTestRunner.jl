@@ -238,7 +238,9 @@ function print_test_started(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        out_str = styled"$(test)$padded_wrkr │{ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
+        # StyledStrings 1.0.3 (used on Julia 1.10) cannot print a styled string whose leading
+        # unstyled text ends in a multi-byte character (e.g. `│`), so style it explicitly
+        out_str = styled"{default:$(test)$padded_wrkr │}{ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -287,7 +289,8 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
         rss_str = @sprintf("%5.2f", mem_use / 2^20)
         padded_rss = lpad(rss_str, ctx.rss_align, " ")
 
-        out_str = styled"$test{$wrkr_face:$padded_wrkr} │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n"
+        # see `print_test_started` for why `test` is styled explicitly
+        out_str = styled"{default:$test}{$wrkr_face:$padded_wrkr} │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
