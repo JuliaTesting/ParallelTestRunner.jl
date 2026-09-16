@@ -1373,12 +1373,8 @@ function _runtests(mod::Module, args::ParsedArgs;
                         lock(io_ctx.lock)
                         try
                             msg_str = styled"""
-                            {ptr_warn,bold:Warning:}{ptr_warn: init time of `$test_name` ($(round(init_t; digits=2))s) was much longer than usual ($(round(cold_t; digits=2))s on a freshly spawned worker).
-                            This is typically due to the number of workers being too high for the amount of available memory,
-                            and can cause hangs and/or much longer test times. Try lowering the RSS threshold before a new
-                            worker is spawned via the JULIA_TEST_MAXRSS_MB environment variable or the `max_worker_rss` keyword
-                            argument to `runtests`. If that does not work, you can manually set the number of jobs using the
-                            `--jobs=N` test argument.}
+                            {ptr_warn,bold:Warning:} {ptr_light:Init time of `$test_name` ({default:$(round(init_t; digits=2))s}) was much longer than usual ({default:$(round(cold_t; digits=2))s} on a freshly spawned worker).
+                            This usually means too many workers for the available memory; see the docs for more information.}
                             """
                             print(io_ctx.stderr, msg_str)
                             flush(io_ctx.stderr)

@@ -236,8 +236,7 @@ end
     # the only thing printed in yellow
     @test count("Warning:", str) == 1
     @test count("\e[33m", str) == 1
-    @test contains(str, r"init time of `[abc]` \(\d+\.\d+s\) was much longer than usual")
-    @test contains(str, "JULIA_TEST_MAXRSS_MB")
+    @test contains(str, r"Init time of `[abc]` \(\d+\.\d+s\) was much longer than usual")
 end
 
 @testset "recycle_on_failure" begin
