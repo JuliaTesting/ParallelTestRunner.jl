@@ -211,14 +211,14 @@ function print_header(::Type{<:AbstractTestRecord}, ctx::TestIOContext, testgrou
         name_pad_str = " "^(ctx.name_align + textwidth(testgroupheader) - 3) * " │ "
         init_str = ctx.verbose ? "   Init   │" : ""
         compile_str = VERSION >= v"1.11" && ctx.verbose ? " Compile │" : ""
-        header_top_str = styled"{ptr_default:$name_pad_str  Test   │$init_str$compile_str ──────────────── CPU ──────────────── │}\n"
+        header_top_str = "$name_pad_str  Test   │$init_str$compile_str ──────────────── CPU ──────────────── │\n"
         print(ctx.stdout, header_top_str)
 
         # header bottom
         workerheaderstr = lpad(workerheader, ctx.name_align - textwidth(testgroupheader) + 1)
         init_time_str = ctx.verbose ? " time (s) │" : ""
         comp_time_str = VERSION >= v"1.11" && ctx.verbose ? "   (%)   │" : ""
-        bottom_header_str = styled"{ptr_default:$testgroupheader$workerheaderstr │ time (s) │$init_time_str$comp_time_str GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │}\n"
+        bottom_header_str = "$testgroupheader$workerheaderstr │ time (s) │$init_time_str$comp_time_str GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │\n"
         print(ctx.stdout, bottom_header_str)
         flush(ctx.stdout)
     finally
@@ -230,7 +230,7 @@ function print_test_started(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        out_str = styled"{ptr_default:$(test)$padded_wrkr │}{ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
+        out_str = styled"$(test)$padded_wrkr │{ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -243,7 +243,7 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        wrkr_face = ctx.recycled[] ? :ptr_warn : :ptr_default
+        wrkr_face = ctx.recycled[] ? :ptr_warn : :default
 
         time_str = @sprintf("%7.2f", base.time)
         padded_time = lpad(time_str, ctx.elapsed_align, " ")
@@ -275,11 +275,11 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
         padded_alloc = lpad(alloc_str, ctx.alloc_align, " ")
 
         mem_use = memory_usage(record)
-        mem_face = mem_use > ctx.max_worker_rss ? :ptr_warn : :ptr_default
+        mem_face = mem_use > ctx.max_worker_rss ? :ptr_warn : :default
         rss_str = @sprintf("%5.2f", mem_use / 2^20)
         padded_rss = lpad(rss_str, ctx.rss_align, " ")
 
-        out_str = styled"{ptr_default:$test{$wrkr_face:$padded_wrkr} │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n}"
+        out_str = styled"$test{$wrkr_face:$padded_wrkr} │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -1087,7 +1087,7 @@ function runtests(mod::Module, args::ParsedArgs;
         for test in sorted_tests
             failed = test in historical_failures
             bullet = failed ? "×" : "-"
-            face = failed ? :ptr_error : :ptr_default
+            face = failed ? :ptr_error : :default
             line = rstrip(" $bullet $(rpad(test, name_align))  $(lpad(duration_strs[test], duration_align))")
             println(stdout, styled"{$face:$line}")
         end
@@ -1363,7 +1363,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                         clear_status()
                         lock(io_ctx.lock)
                         try
-                            println(io_ctx.stdout, styled"{ptr_default:Retrying $tests_n failed test$(tests_n > 1 ? \"s\" : \" \") ($retry_n)}")
+                            println(io_ctx.stdout, "Retrying $tests_n failed test$(tests_n > 1 ? "s" : " ") ($retry_n)")
                             flush(io_ctx.stdout)
                         finally
                             unlock(io_ctx.lock)
@@ -1660,7 +1660,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             testface = if result isa Exception || anynonpass(result[])
                 :ptr_error
             else
-                :ptr_default
+                :default
             end
             println(io_ctx.stdout, styled"\nOutput generated during execution of '{$testface:$testname}':")
             lines = collect(eachline(IOBuffer(output)))
@@ -1796,7 +1796,6 @@ runtests(mod::Module, ARGS::Array{String}; kwargs...) = runtests(mod, parse_args
 
 # register faces used in printing
 function __init__()
-    addface!(:ptr_default => Face(inherit=:default))
     addface!(:ptr_warn => Face(inherit=:yellow))
     addface!(:ptr_error => Face(inherit=:red))
     addface!(:ptr_light => Face(inherit=:light))
