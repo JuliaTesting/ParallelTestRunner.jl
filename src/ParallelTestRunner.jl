@@ -544,7 +544,7 @@ available system memory.
 function default_njobs(;
         memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
         # Just use Sys.EFFECTIVE_CPU_THREADS when min VERSION >= v"1.13"
-        _cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Symbol("Sys.EFFECTIVE_CPU_THREADS") : Symbol("Sys.CPU_THREADS")),
+        _cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
         _free_memory = available_memory(),
     )
     memory_jobs = Int64(_free_memory) ÷ memory_per_worker
