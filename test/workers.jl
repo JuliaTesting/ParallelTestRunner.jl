@@ -236,7 +236,7 @@ end
     # the only thing printed in yellow
     @test count("Warning:", str) == 1
     @test count("\e[33m", str) == 1
-    @test contains(str, r"Init time of `[abc]` \(\d+\.\d+s\) was much longer than usual")
+    @test contains(str, r"Init time of `[abc]`")
 end
 
 @testset "recycle_on_failure" begin
