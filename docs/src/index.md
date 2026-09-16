@@ -107,6 +107,7 @@ Pkg.test("MyPackage"; test_args=`--verbose --jobs=4 integration`)
 
 Tests run concurrently in isolated worker processes, each inside own module.
 `ParallelTestRunner` records historical tests duration for each package, so that in subsequent runs long-running tests are executed first, to improve load balancing.
+See [Choosing the Number of Jobs](@ref) for how the number of workers is chosen.
 
 ### Serial Test Support
 
