@@ -162,6 +162,55 @@ end
     @test contains(str, "SUCCESS")
 end
 
+# Regression test for <https://github.com/JuliaTesting/ParallelTestRunner.jl/pull/158>:
+# packages may prefilter `testsuite` with `filter_tests!` (and possibly do their own
+# filtering) before calling `runtests`, so names in `serial` may legitimately be missing
+# from `testsuite`.
+@testset "serial names missing from prefiltered testsuite" begin
+    function make_testsuite()
+        return Dict(
+            "unit/a" => :(),
+            "unit/b" => :(),
+            # These test files shouldn't be called, we use `@test false` to make sure they're not.
+            "integration/c" => :(@test false),
+            "optional/d" => :(@test false),
+        )
+    end
+
+    @testset "positional args: $(positionals)" for positionals in (["unit"], ["!integration", "!optional"])
+        testsuite = make_testsuite()
+        args = parse_args(positionals)
+        # The user requested specific tests, so no further filtering is allowed
+        @test !filter_tests!(testsuite, args)
+        @test sort!(collect(keys(testsuite))) == ["unit/a", "unit/b"]
+        io = IOBuffer()
+        @show_if_error io runtests(ParallelTestRunner, args; testsuite, stdout=io, stderr=io,
+                                   serial=["unit/a", "integration/c", "optional/d"])
+        str = String(take!(io))
+        @test contains(str, "Running 2 tests")
+        @test contains(str, "1 serial test(s)")
+        @test contains(str, "SUCCESS")
+    end
+
+    @testset "custom filtering" begin
+        testsuite = make_testsuite()
+        args = parse_args(String[])
+        # No positional arguments, so the package can do its own filtering
+        if filter_tests!(testsuite, args)
+            delete!(testsuite, "integration/c")
+            delete!(testsuite, "optional/d")
+        end
+        @test sort!(collect(keys(testsuite))) == ["unit/a", "unit/b"]
+        io = IOBuffer()
+        @show_if_error io runtests(ParallelTestRunner, args; testsuite, stdout=io, stderr=io,
+                                   serial=["unit/a", "integration/c", "optional/d"])
+        str = String(take!(io))
+        @test contains(str, "Running 2 tests")
+        @test contains(str, "1 serial test(s)")
+        @test contains(str, "SUCCESS")
+    end
+end
+
 @testset "crashing serial test" begin
     serial_test_body = quote
         children = _count_child_pids($(getpid()))
