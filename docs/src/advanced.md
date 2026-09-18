@@ -243,6 +243,7 @@ The number of jobs can also be forced with `--jobs=N` or the `PTR_NUM_JOBS` envi
 More jobs is not always faster: once the machine runs out of memory the whole suite slows down, sometimes enough to time out a CI job.
 This has been especially problematic on low-memory macOS machines (notably CI runners), where memory compression makes each garbage collection slower.
 If you notice per-test init times (shown with `--verbose`) steadily increasing over the run and/or a higher-than-usual GC %, it might be worth tweaking the job selection behaviour.
+The runner prints a warning the first time a test's init time gets much longer than on a freshly spawned worker, and recycles such workers since a restart is cheaper by then.
 See [issue #124](https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/124) for more details.
 
 ## Custom Workers
