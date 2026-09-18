@@ -160,6 +160,14 @@ function memory_usage(rec::AbstractTestRecord)
     return parent(rec).rss
 end
 
+function init_time(rec::AbstractTestRecord)
+    base = parent(rec)
+    return base.total_time - base.time
+end
+
+# the user is warned once a warm worker's init time exceeds this multiple of the cold-start cost
+const SLOW_INIT_FACTOR = 2
+
 function Base.getindex(rec::AbstractTestRecord)
     return parent(rec).value
 end
@@ -211,14 +219,14 @@ function print_header(::Type{<:AbstractTestRecord}, ctx::TestIOContext, testgrou
         name_pad_str = " "^(ctx.name_align + textwidth(testgroupheader) - 3) * " │ "
         init_str = ctx.verbose ? "   Init   │" : ""
         compile_str = VERSION >= v"1.11" && ctx.verbose ? " Compile │" : ""
-        header_top_str = styled"{ptr_default:$name_pad_str  Test   │$init_str$compile_str ──────────────── CPU ──────────────── │}\n"
+        header_top_str = "$name_pad_str  Test   │$init_str$compile_str ──────────────── CPU ──────────────── │\n"
         print(ctx.stdout, header_top_str)
 
         # header bottom
         workerheaderstr = lpad(workerheader, ctx.name_align - textwidth(testgroupheader) + 1)
         init_time_str = ctx.verbose ? " time (s) │" : ""
         comp_time_str = VERSION >= v"1.11" && ctx.verbose ? "   (%)   │" : ""
-        bottom_header_str = styled"{ptr_default:$testgroupheader$workerheaderstr │ time (s) │$init_time_str$comp_time_str GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │}\n"
+        bottom_header_str = "$testgroupheader$workerheaderstr │ time (s) │$init_time_str$comp_time_str GC (s) │ GC % │ Alloc (MB) │ RSS (MB) │\n"
         print(ctx.stdout, bottom_header_str)
         flush(ctx.stdout)
     finally
@@ -230,7 +238,9 @@ function print_test_started(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        out_str = styled"{ptr_default:$(test)$padded_wrkr │}{ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
+        # StyledStrings 1.0.3 (used on Julia 1.10) cannot print a styled string whose leading
+        # unstyled text ends in a multi-byte character (e.g. `│`), so style it explicitly
+        out_str = styled"{default:$(test)$padded_wrkr │}{ptr_light:$(\" \"^ctx.elapsed_align) started at $(now())}\n"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -243,7 +253,7 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
     lock(ctx.lock)
     try
         padded_wrkr = lpad("($wrkr)", ctx.name_align - textwidth(test) + 1, " ")
-        wrkr_face = ctx.recycled[] ? :ptr_warn : :ptr_default
+        wrkr_face = ctx.recycled[] ? :ptr_warn : :default
 
         time_str = @sprintf("%7.2f", base.time)
         padded_time = lpad(time_str, ctx.elapsed_align, " ")
@@ -275,11 +285,12 @@ function print_test_finished(record::AbstractTestRecord, wrkr, test, ctx::TestIO
         padded_alloc = lpad(alloc_str, ctx.alloc_align, " ")
 
         mem_use = memory_usage(record)
-        mem_face = mem_use > ctx.max_worker_rss ? :ptr_warn : :ptr_default
+        mem_face = mem_use > ctx.max_worker_rss ? :ptr_warn : :default
         rss_str = @sprintf("%5.2f", mem_use / 2^20)
         padded_rss = lpad(rss_str, ctx.rss_align, " ")
 
-        out_str = styled"{ptr_default:$test{$wrkr_face:$padded_wrkr} │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n}"
+        # see `print_test_started` for why `test` is styled explicitly
+        out_str = styled"{default:$test}{$wrkr_face:$padded_wrkr} │ $padded_time │ $padded_init_time$padded_comp_time$padded_gc │ $padded_percent │ $padded_alloc │ {$mem_face:$padded_rss} │\n"
         print(ctx.stdout, out_str)
         flush(ctx.stdout)
     finally
@@ -1089,7 +1100,7 @@ function runtests(mod::Module, args::ParsedArgs;
         for test in sorted_tests
             failed = test in historical_failures
             bullet = failed ? "×" : "-"
-            face = failed ? :ptr_error : :ptr_default
+            face = failed ? :ptr_error : :default
             line = rstrip(" $bullet $(rpad(test, name_align))  $(lpad(duration_strs[test], duration_align))")
             println(stdout, styled"{$face:$line}")
         end
@@ -1184,6 +1195,10 @@ function _runtests(mod::Module, args::ParsedArgs;
     t0 = time()
     results = Lockable([])
     running_tests = Lockable(Dict{String, Float64}())  # test => start_time
+    # init time of a test on a freshly spawned worker, i.e. the cost of recycling one
+    cold_init_time = Threads.Atomic{Float64}(Inf)
+    # the slow init warning is only printed once per run
+    slow_init_warned = Threads.Atomic{Bool}(false)
 
     worker_tasks = Task[]
 
@@ -1317,6 +1332,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     # Message types for the printer channel
     # (:started, test_name, worker_id)
     # (:finished, test_name, worker_id, record, recycled)
+    # (:slow_init, test_name, init_time, cold_init_time)
     # (:crashed, test_name, worker_id, test_time)
     # (:retry, tests_n, retry_n)
     # (:nonpass_face, face)
@@ -1353,6 +1369,22 @@ function _runtests(mod::Module, args::ParsedArgs;
                             print_test_finished(record, wrkr, test_name, io_ctx)
                         end
 
+                    elseif msg_type === :slow_init
+                        test_name, init_t, cold_t = msg[2], msg[3], msg[4]
+
+                        clear_status()
+                        lock(io_ctx.lock)
+                        try
+                            msg_str = styled"""
+                            {ptr_warn,bold:Warning:} {ptr_light:Init time of `$test_name` ({default:$(round(init_t; digits=2))s}) was much longer than usual ({default:$(round(cold_t; digits=2))s} on a freshly spawned worker).
+                            This usually means too many workers for the available memory; see the docs for more information.}
+                            """
+                            print(io_ctx.stderr, msg_str)
+                            flush(io_ctx.stderr)
+                        finally
+                            unlock(io_ctx.lock)
+                        end
+
                     elseif msg_type === :crashed
                         test_name, wrkr = msg[2], msg[3]
 
@@ -1365,7 +1397,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                         clear_status()
                         lock(io_ctx.lock)
                         try
-                            println(io_ctx.stdout, styled"{ptr_default:Retrying $tests_n failed test$(tests_n > 1 ? \"s\" : \" \") ($retry_n)}")
+                            println(io_ctx.stdout, "Retrying $tests_n failed test$(tests_n > 1 ? "s" : " ") ($retry_n)")
                             flush(io_ctx.stdout)
                         finally
                             unlock(io_ctx.lock)
@@ -1474,9 +1506,11 @@ function _runtests(mod::Module, args::ParsedArgs;
                               wrkr = p
                           end
                           # if a worker failed, spawn a new one
+                          fresh_worker = false
                           if wrkr === nothing || !Malt.isrunning(wrkr)
                               wrkr = p = addworker(; init_worker_code, io_ctx.color,
                                                    exename, exeflags, env)
+                              fresh_worker = true
                           end
 
                           # run the test
@@ -1507,6 +1541,13 @@ function _runtests(mod::Module, args::ParsedArgs;
 
                           # act on the results
                           if result isa AbstractTestRecord
+                              if fresh_worker
+                                  Threads.atomic_min!(cold_init_time, init_time(result))
+                              end
+                              # the pre-test full GC has become much slower than spawning a
+                              # new worker, which typically means there are too many workers
+                              # for the available memory (e.g. macOS memory pressure, #124)
+                              slow_init = wrkr === p && !fresh_worker && init_time(result) > SLOW_INIT_FACTOR * cold_init_time[]
                               # recycle a pool worker so future tests start with a smaller working
                               # set, or so that a failing test that may have left the worker in a
                               # bad state (e.g. a wedged GPU driver) cannot poison later tests
@@ -1514,6 +1555,9 @@ function _runtests(mod::Module, args::ParsedArgs;
                               recycle = wrkr === p && (memory_usage(result) > max_worker_rss ||
                                                        ((recycle_on_failure || retry_mode) && anynonpass(result[])))
                               put!(printer_channel, (:finished, test, worker_id(wrkr), result, recycle))
+                              if slow_init && !Threads.atomic_xchg!(slow_init_warned, true)
+                                  put!(printer_channel, (:slow_init, test, init_time(result), cold_init_time[]))
+                              end
                               if anynonpass(result[]) && args.quickfail !== nothing
                                   stop_work()
                                   return
@@ -1662,7 +1706,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             testface = if result isa Exception || anynonpass(result[])
                 :ptr_error
             else
-                :ptr_default
+                :default
             end
             println(io_ctx.stdout, styled"\nOutput generated during execution of '{$testface:$testname}':")
             lines = collect(eachline(IOBuffer(output)))
@@ -1798,7 +1842,6 @@ runtests(mod::Module, ARGS::Array{String}; kwargs...) = runtests(mod, parse_args
 
 # register faces used in printing
 function __init__()
-    addface!(:ptr_default => Face(inherit=:default))
     addface!(:ptr_warn => Face(inherit=:yellow))
     addface!(:ptr_error => Face(inherit=:red))
     addface!(:ptr_light => Face(inherit=:light))

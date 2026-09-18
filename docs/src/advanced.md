@@ -225,11 +225,25 @@ and a yellow one marks a result that may still be replaced.
     well together: recycling keeps one bad test from cascading onto its worker during the run,
     while retries give the tests that did fail a contention-free second chance.
 
-## Memory Pressure on macOS
+## Choosing the Number of Jobs
 
-On memory-constrained macOS machines (notably CI runners), requesting more jobs than the default can make the test suite take much longer than expected, sometimes enough to time out the job.
-This often manifests as per-test init times (shown with `--verbose`) steadily increasing over the run, likely because macOS compresses memory under pressure and each garbage collection gets slower. GC % being higer than usual can also be an indication that you're requesting too many jobs or that the max RSS threshold is too high.
-Prefer the default `--jobs` value, which accounts for available memory, and lower the `JULIA_TEST_MAXRSS_MB` environment variable so that workers get recycled sooner. See [issue #124](https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/124) for more details.
+By default, ParallelTestRunner.jl runs with one worker per 2 GiB of available memory, capped by the number of effective CPU threads.
+For less demanding test suites, pass a smaller `memory_per_worker` (in bytes) to [`runtests`](@ref) to get more parallelism; for memory-hungry ones, pass a larger value.
+Since it only adjusts the default, the number of jobs still adapts to the memory of each machine running the tests.
+
+```julia
+runtests(MyPackage, ARGS; memory_per_worker = 2^30) # 1 GiB per worker
+```
+
+Workers are recycled once they exceed the `JULIA_TEST_MAXRSS_MB` environment variable (or the `max_worker_rss` keyword).
+Lowering it keeps memory pressure in check, which can make it possible to run more workers than would otherwise be safe.
+
+The number of jobs can also be forced with `--jobs=N` or the `PTR_NUM_JOBS` environment variable, but this bypasses the memory check entirely.
+
+More jobs is not always faster: once the machine runs out of memory the whole suite slows down, sometimes enough to time out a CI job.
+This has been especially problematic on low-memory macOS machines (notably CI runners), where memory compression makes each garbage collection slower.
+If you notice per-test init times (shown with `--verbose`) steadily increasing over the run and/or a higher-than-usual GC %, it might be worth tweaking the job selection behaviour.
+See [issue #124](https://github.com/JuliaTesting/ParallelTestRunner.jl/issues/124) for more details.
 
 ## Custom Workers
 
@@ -363,4 +377,4 @@ function jltest {
 
 1. **Only use `retries` for worker contention-related failures**: Not all intermittent failures are caused by parallel worker resource contention. Ensure you aren't masking real test failures when using this feature.
 
-1. **Don't request too many jobs on low-memory macOS machines**: tests can take much longer than expected; see [Memory Pressure on macOS](@ref).
+1. **Don't request too many jobs on low-memory machines**: tests can take much longer than expected, especially on macOS; see [Choosing the Number of Jobs](@ref).

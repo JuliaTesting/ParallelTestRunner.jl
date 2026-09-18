@@ -107,6 +107,7 @@ Pkg.test("MyPackage"; test_args=`--verbose --jobs=4 integration`)
 
 Tests run concurrently in isolated worker processes, each inside own module.
 `ParallelTestRunner` records historical tests duration for each package, so that in subsequent runs long-running tests are executed first, to improve load balancing.
+See [Choosing the Number of Jobs](@ref) for how the number of workers is chosen.
 
 ### Serial Test Support
 
@@ -130,6 +131,7 @@ See [Failure Handling](@ref) in the advanced usage guide for details.
 The test runner provides real-time output showing:
 - Test name and worker assignment, with the worker shown in yellow when it is about to be recycled
 - Execution time
+- Init time (with `--verbose`), i.e. the time spent before the test started
 - GC time and percentage
 - Memory allocation
 - RSS (Resident Set Size) memory usage, shown in yellow once it exceeds the RSS threshold
