@@ -202,6 +202,78 @@ end
     end
 end
 
+@testset "history_key selects the history file" begin
+    mod = history_module("key")
+    @test ParallelTestRunner.get_history_file(mod, nothing) == history_file(mod)
+    keyed = ParallelTestRunner.get_history_file(mod, "gpu")
+    @test dirname(keyed) == dirname(history_file(mod))
+    @test basename(keyed) == "HistoryTest_key-gpu.jls"
+    sanitized = ParallelTestRunner.get_history_file(mod, "cuda/12.9 x")
+    @test dirname(sanitized) == dirname(history_file(mod))
+    @test basename(sanitized) == "HistoryTest_key-cuda_12.9_x.jls"
+    @test_throws ArgumentError ParallelTestRunner.get_history_file(mod, "")
+end
+
+@testset "keyed and unkeyed histories are independent" begin
+    mod = history_module("isolation")
+    keyed_file = ParallelTestRunner.get_history_file(mod, "gpu")
+    remove_history(mod)
+    rm(keyed_file; force=true)
+    try
+        io = IOBuffer()
+        runtests(mod, ["--jobs=1"]; testsuite=Dict("a" => :(@test true)), history_key="gpu", stdout=io, stderr=io)
+        runtests(mod, ["--jobs=1"]; testsuite=Dict("b" => :(@test true)), stdout=io, stderr=io)
+        @test collect(keys(first(ParallelTestRunner.load_test_history(mod, "gpu")))) == ["a"]
+        @test collect(keys(first(ParallelTestRunner.load_test_history(mod)))) == ["b"]
+    finally
+        remove_history(mod)
+        rm(keyed_file; force=true)
+    end
+end
+
+@testset "scheduling uses the keyed history" begin
+    mod = history_module("keyed_order")
+    keyed_file = ParallelTestRunner.get_history_file(mod, "gpu")
+    remove_history(mod)
+    rm(keyed_file; force=true)
+    try
+        # the two histories disagree on which test is slow; the keyed one must decide
+        ParallelTestRunner.save_test_history(mod, (Dict("slow" => 10.0, "fast" => 1.0), Set{String}()); history_key="gpu")
+        ParallelTestRunner.save_test_history(mod, (Dict("slow" => 1.0, "fast" => 10.0), Set{String}()))
+        testsuite = Dict("slow" => :(@test true), "fast" => :(@test true))
+        io = IOBuffer()
+        runtests(mod, ["--jobs=1", "--verbose"]; testsuite, history_key="gpu", stdout=io, stderr=io)
+        str = String(take!(io))
+        @test findfirst("slow", str) < findfirst("fast", str)
+    finally
+        remove_history(mod)
+        rm(keyed_file; force=true)
+    end
+end
+
+@testset "--list respects history_key" begin
+    mod = history_module("keyed_list")
+    keyed_file = ParallelTestRunner.get_history_file(mod, "gpu")
+    remove_history(mod)
+    rm(keyed_file; force=true)
+    function list_output(kwargs)
+        code = """
+            using ParallelTestRunner
+            testsuite = Dict("alpha" => :(@test true))
+            runtests(Module($(repr(nameof(mod)))), ["--list"]; testsuite, $kwargs)
+            """
+        return readlines(`$run_history_test_process --color=no -e $code`)
+    end
+    try
+        ParallelTestRunner.save_test_history(mod, (Dict("alpha" => 1.234), Set{String}()); history_key="gpu")
+        @test list_output("history_key=\"gpu\"") == ["Available tests:", " - alpha  (1.23s)"]
+        @test list_output("history_key=nothing") == ["Available tests:", " - alpha"]
+    finally
+        remove_history(mod)
+        rm(keyed_file; force=true)
+    end
+end
+
 # All workers must have been stopped once `runtests` returns.
 @testset "no workers running" begin
     children = _count_child_pids()

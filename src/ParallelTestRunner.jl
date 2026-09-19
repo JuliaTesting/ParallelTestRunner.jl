@@ -571,14 +571,19 @@ end
 Base.isless(a::TestHistoryEntry, b::TestHistoryEntry) = a.failed == b.failed ? a.duration < b.duration : a.failed < b.failed
 
 # Historical test duration database
-function get_history_file(mod::Module)
+function get_history_file(mod::Module, history_key::Union{Nothing, AbstractString} = nothing)
     # History file version. Change when modifying the history format
     hist_ver = "v2"
     scratch_dir = @get_scratch!("durations")
-    return joinpath(scratch_dir, "v$(VERSION.major).$(VERSION.minor)", hist_ver, "$(nameof(mod)).jls")
+    name = string(nameof(mod))
+    if history_key !== nothing
+        isempty(history_key) && throw(ArgumentError("history_key must not be empty"))
+        name *= "-" * replace(history_key, r"[^\w.-]" => "_")
+    end
+    return joinpath(scratch_dir, "v$(VERSION.major).$(VERSION.minor)", hist_ver, "$name.jls")
 end
-function load_test_history(mod::Module)
-    history_file = get_history_file(mod)
+function load_test_history(mod::Module, history_key = nothing)
+    history_file = get_history_file(mod, history_key)
     if isfile(history_file)
         try
             return deserialize(history_file)::Tuple{Dict{String, Float64}, Set{String}}
@@ -627,11 +632,11 @@ set of failing tests. Entries of tests not mentioned are left as they are, so co
 on the same machine only ever update their own tests.
 """
 function update_test_history!(mod::Module, durations::Dict{String, Float64},
-                              passed::Set{String}, failed::Set{String})
-    history_file = get_history_file(mod)
+                              passed::Set{String}, failed::Set{String}; history_key = nothing)
+    history_file = get_history_file(mod, history_key)
     try
         with_history_lock(history_file) do
-            stored_durations, stored_failures = load_test_history(mod)
+            stored_durations, stored_failures = load_test_history(mod, history_key)
             merge!(stored_durations, durations)
             setdiff!(stored_failures, passed)
             union!(stored_failures, failed)
@@ -654,14 +659,14 @@ end
 PendingHistory() = PendingHistory(Dict{String, Float64}(), Set{String}(), Set{String}())
 
 function record_test_history!(pending::Lockable{PendingHistory}, mod::Module, test::String, result, duration::Real;
-                              history_flush_every::Integer)
+                              history_flush_every::Integer, history_key = nothing)
     failed = !(result isa AbstractTestRecord) || anynonpass(result[])
     batch = @lock pending begin
         pending[].durations[test] = Float64(duration)
         push!(failed ? pending[].failed : pending[].passed, test)
         length(pending[].durations) >= history_flush_every ? take_pending_history!(pending[]) : nothing
     end
-    batch === nothing || update_test_history!(mod, batch...)
+    batch === nothing || update_test_history!(mod, batch...; history_key)
     return nothing
 end
 
@@ -671,15 +676,16 @@ function take_pending_history!(pending::PendingHistory)
     return batch
 end
 
-function flush_test_history!(pending::Lockable{PendingHistory}, mod::Module)
+function flush_test_history!(pending::Lockable{PendingHistory}, mod::Module; history_key = nothing)
     batch = @lock pending take_pending_history!(pending[])
-    isempty(batch[1]) || update_test_history!(mod, batch...)
+    isempty(batch[1]) || update_test_history!(mod, batch...; history_key)
     return nothing
 end
 
 # Replace the whole history, e.g. to seed it in tests.
-function save_test_history(mod::Module, history::Tuple{Dict{String, Float64}, Set{String}})
-    history_file = get_history_file(mod)
+function save_test_history(mod::Module, history::Tuple{Dict{String, Float64}, Set{String}};
+                           history_key = nothing)
+    history_file = get_history_file(mod, history_key)
     try
         with_history_lock(history_file) do
             write_test_history(history_file, history)
@@ -1010,6 +1016,7 @@ end
              recycle_on_failure::Bool = false,
              retries::Integer = 0,
              history_flush_every::Integer = 20,
+             history_key = nothing,
              )
     runtests(mod::Module, ARGS; ...)
 
@@ -1071,6 +1078,9 @@ Several keyword arguments are also supported:
   written when the run ends. Larger values mean fewer lock, write and rename operations,
   which matters on slow filesystems, while an interrupted run loses at most that many
   measurements.
+- `history_key`: Keep a separate history of test durations and failures for this
+  configuration, e.g. `"gpu"` or the name of a CI job, when the same test suite is run in
+  configurations whose timings differ. By default all runs of `mod` share one history.
 
 ## Command Line Options
 
@@ -1180,6 +1190,7 @@ function runtests(mod::Module, args::ParsedArgs;
                   recycle_on_failure::Bool = false,
                   retries::Integer = 0,
                   history_flush_every::Integer = 20,
+                  history_key::Union{Nothing, AbstractString} = nothing,
                   )
     #
     # set-up
@@ -1187,7 +1198,7 @@ function runtests(mod::Module, args::ParsedArgs;
 
     # list tests, if requested
     if args.list !== nothing
-        historical_durations, historical_failures = load_test_history(mod)
+        historical_durations, historical_failures = load_test_history(mod, history_key)
         sorted_tests = sort(collect(keys(testsuite)))
         name_align = isempty(sorted_tests) ? 0 : maximum(textwidth, sorted_tests)
         duration_strs = Dict(
@@ -1219,7 +1230,7 @@ function runtests(mod::Module, args::ParsedArgs;
     # determine test order
     tests = collect(keys(testsuite))
     Random.shuffle!(tests)
-    historical_durations, historical_failures = load_test_history(mod)
+    historical_durations, historical_failures = load_test_history(mod, history_key)
     get_historical_duration(test) = TestHistoryEntry(get(historical_durations, test, Inf), test in historical_failures)
     sort!(tests, by = x -> get_historical_duration(x), rev = true)
 
@@ -1229,6 +1240,7 @@ function runtests(mod::Module, args::ParsedArgs;
         tests,
         historical_durations,
         historical_failures,
+        history_key,
         init_code,
         init_worker_code,
         test_worker,
@@ -1255,6 +1267,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                    tests::Vector{String},
                    historical_durations::Dict{String, Float64} = Dict{String, Float64}(),
                    historical_failures::Set{String} = Set{String}(),
+                   history_key = nothing,
                    init_code = :(),
                    init_worker_code = :(),
                    test_worker = Returns(nothing),
@@ -1640,7 +1653,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                               retry_mode && filter!(r -> r.test != test, results[])
                               push!(results[], (; test, result, output, test_t0, test_t1))
                           end
-                          record_test_history!(pending_history, mod, test, result, test_t1 - test_t0; history_flush_every)
+                          record_test_history!(pending_history, mod, test, result, test_t1 - test_t0; history_flush_every, history_key)
 
                           # act on the results
                           if result isa AbstractTestRecord
@@ -1906,7 +1919,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             Test.TESTSET_PRINT_ENABLE[] = old_print_setting
         end
     end
-    flush_test_history!(pending_history, mod)
+    flush_test_history!(pending_history, mod; history_key)
 
     # display the results
     println(io_ctx.stdout)

@@ -108,6 +108,10 @@ Pkg.test("MyPackage"; test_args=`--verbose --jobs=4 integration`)
 Tests run concurrently in isolated worker processes, each inside own module.
 `ParallelTestRunner` records historical tests duration for each package, so that in subsequent runs long-running tests are executed first, to improve load balancing.
 See [Choosing the Number of Jobs](@ref) for how the number of workers is chosen.
+The history is shared by all runs of the package on a machine and updated during the run, in
+batches of a few tests, so concurrent runs can share it safely. When the same suite is run in
+configurations with different timings (for example on a CPU and on a GPU) pass
+`history_key = "gpu"` to `runtests` to keep a separate history per configuration.
 
 ### Serial Test Support
 
