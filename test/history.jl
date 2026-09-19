@@ -14,8 +14,7 @@ const run_history_test_process = `$(Base.julia_cmd()) --startup-file=no --projec
 function backdate!(path, seconds)
     t = time() - seconds
     req = Libc.malloc(Base._sizeof_uv_fs)
-    ret = ccall(:uv_fs_utime, Cint, (Ptr{Cvoid}, Ptr{Cvoid}, Cstring, Float64, Float64, Ptr{Cvoid}),
-                C_NULL, req, path, t, t, C_NULL)
+    ret = @ccall uv_fs_utime(C_NULL::Ptr{Cvoid}, req::Ptr{Cvoid}, path::Cstring, t::Cdouble, t::Cdouble, C_NULL::Ptr{Cvoid})::Cint
     Base.Filesystem.uv_fs_req_cleanup(req)
     Libc.free(req)
     ret < 0 && Base.uv_error("utime", ret)
@@ -198,5 +197,13 @@ end
         @test ParallelTestRunner.load_test_history(mod) == (Dict("b" => 2.0), Set{String}())
     finally
         remove_history(mod)
+    end
+end
+
+# All workers must have been stopped once `runtests` returns.
+@testset "no workers running" begin
+    children = _count_child_pids()
+    if children >= 0
+        @test children == 0
     end
 end
