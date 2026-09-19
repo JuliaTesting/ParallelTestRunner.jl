@@ -646,7 +646,7 @@ end
 # Outcomes of finished tests waiting to be merged into the history file. Writing them in
 # batches keeps the number of lock, write and rename operations low on slow filesystems, while
 # an interrupted run still keeps all but the last few measurements.
-const history_flush_every = 20
+history_flush_every::Int = 20
 
 struct PendingHistory
     durations::Dict{String, Float64}
