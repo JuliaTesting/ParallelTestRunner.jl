@@ -9,6 +9,7 @@ using Base.Filesystem: path_separator
 using Statistics
 using Scratch
 using Serialization
+using FileWatching: Pidfile
 import Test
 import Random
 import IOCapture
@@ -587,14 +588,107 @@ function load_test_history(mod::Module)
     end
     return (Dict{String, Float64}(), Set{String}())
 end
+
+# Runs on the same machine share the history file, so all writes happen under a lock and go
+# through a temporary file, which keeps readers from ever seeing a partially written history.
+const history_lock_stale_age = 60
+
+function with_history_lock(f, history_file)
+    mkpath(dirname(history_file))
+    lock_file = history_file * ".lock"
+    # Without waiting, Pidfile removes a lock left behind by a dead process right away; when
+    # waiting, it only checks for staleness after `stale_age` has passed.
+    lock = try
+        Pidfile.mkpidlock(lock_file; stale_age=history_lock_stale_age, wait=false)
+    catch err
+        err isa Pidfile.PidlockedError || rethrow()
+        Pidfile.mkpidlock(lock_file; stale_age=history_lock_stale_age)
+    end
+    try
+        return f()
+    finally
+        close(lock)
+    end
+end
+
+function write_test_history(history_file, history::Tuple{Dict{String, Float64}, Set{String}})
+    temporary_file = history_file * ".tmp.$(getpid())"
+    serialize(temporary_file, history)
+    mv(temporary_file, history_file; force=true)
+    return nothing
+end
+
+"""
+    update_test_history!(mod, durations, passed, failed)
+
+Merge the outcome of the tests this run completed into the on-disk history of `mod`: `durations`
+maps test names to seconds, `passed` and `failed` are the names to remove from and add to the
+set of failing tests. Entries of tests not mentioned are left as they are, so concurrent runs
+on the same machine only ever update their own tests.
+"""
+function update_test_history!(mod::Module, durations::Dict{String, Float64},
+                              passed::Set{String}, failed::Set{String})
+    history_file = get_history_file(mod)
+    try
+        with_history_lock(history_file) do
+            stored_durations, stored_failures = load_test_history(mod)
+            merge!(stored_durations, durations)
+            setdiff!(stored_failures, passed)
+            union!(stored_failures, failed)
+            write_test_history(history_file, (stored_durations, stored_failures))
+        end
+    catch e
+        @warn "Failed to update test history in $history_file" exception=e
+    end
+    return nothing
+end
+
+# Outcomes of finished tests waiting to be merged into the history file. Writing them in
+# batches keeps the number of lock, write and rename operations low on slow filesystems, while
+# an interrupted run still keeps all but the last few measurements.
+const history_flush_every = 20
+
+struct PendingHistory
+    durations::Dict{String, Float64}
+    passed::Set{String}
+    failed::Set{String}
+end
+PendingHistory() = PendingHistory(Dict{String, Float64}(), Set{String}(), Set{String}())
+
+function record_test_history!(pending::Lockable{PendingHistory}, mod::Module, test::String, result, duration::Real)
+    failed = !(result isa AbstractTestRecord) || anynonpass(result[])
+    batch = @lock pending begin
+        pending[].durations[test] = Float64(duration)
+        push!(failed ? pending[].failed : pending[].passed, test)
+        length(pending[].durations) >= history_flush_every ? take_pending_history!(pending[]) : nothing
+    end
+    batch === nothing || update_test_history!(mod, batch...)
+    return nothing
+end
+
+function take_pending_history!(pending::PendingHistory)
+    batch = (copy(pending.durations), copy(pending.passed), copy(pending.failed))
+    empty!(pending.durations); empty!(pending.passed); empty!(pending.failed)
+    return batch
+end
+
+function flush_test_history!(pending::Lockable{PendingHistory}, mod::Module)
+    batch = @lock pending take_pending_history!(pending[])
+    isempty(batch[1]) || update_test_history!(mod, batch...)
+    return nothing
+end
+
+# Replace the whole history, e.g. to seed it in tests.
 function save_test_history(mod::Module, history::Tuple{Dict{String, Float64}, Set{String}})
     history_file = get_history_file(mod)
     try
-        mkpath(dirname(history_file))
-        serialize(history_file, history)
+        with_history_lock(history_file) do
+            write_test_history(history_file, history)
+        end
     catch e
         @warn "Failed to save test history to $history_file" exception=e
     end
+    return nothing
 end
 
 function test_exe(color::Bool=false)
@@ -1192,6 +1286,7 @@ function _runtests(mod::Module, args::ParsedArgs;
 
     t0 = time()
     results = Lockable([])
+    pending_history = Lockable(PendingHistory())
     running_tests = Lockable(Dict{String, Float64}())  # test => start_time
     # init time of a test on a freshly spawned worker, i.e. the cost of recycling one
     cold_init_time = Threads.Atomic{Float64}(Inf)
@@ -1536,6 +1631,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                               retry_mode && filter!(r -> r.test != test, results[])
                               push!(results[], (; test, result, output, test_t0, test_t1))
                           end
+                          record_test_history!(pending_history, mod, test, result, test_t1 - test_t0)
 
                           # act on the results
                           if result isa AbstractTestRecord
@@ -1760,10 +1856,6 @@ function _runtests(mod::Module, args::ParsedArgs;
                 push!(completed_tests, testname)
 
                 testset = if result isa AbstractTestRecord
-                    historical_durations[testname] = stop - start
-                    # push to historical_failures on failure and delete on success
-                    push_or_delete! = anynonpass(result[]) ? push! : delete!
-                    push_or_delete!(historical_failures, testname)
                     result[]
                 else
                     # If this test raised an exception that means the test runner itself had some problem,
@@ -1773,7 +1865,6 @@ function _runtests(mod::Module, args::ParsedArgs;
                     @assert result isa Exception
                     err_ts = create_testset(testname; start, stop)
                     Test.record(err_ts, Test.Error(:nontest_error, testname, nothing, Base.ExceptionStack(NamedTuple[(;exception = result, backtrace = Union{Ptr{Nothing}, Base.InterpreterIP}[])]), LineNumberNode(1)))
-                    push!(historical_failures, testname)
                     err_ts
                 end
 
@@ -1806,7 +1897,7 @@ function _runtests(mod::Module, args::ParsedArgs;
             Test.TESTSET_PRINT_ENABLE[] = old_print_setting
         end
     end
-    save_test_history(mod, (historical_durations, historical_failures))
+    flush_test_history!(pending_history, mod)
 
     # display the results
     println(io_ctx.stdout)
