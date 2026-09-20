@@ -1009,7 +1009,8 @@ end
              serial_position::Symbol = :before,
              recycle_on_failure::Bool = false,
              retries::Integer = 0,
-             history_flush_every::Integer = 20)
+             history_flush_every::Integer = 20,
+             )
     runtests(mod::Module, ARGS; ...)
 
 Run Julia tests in parallel across multiple worker processes.
