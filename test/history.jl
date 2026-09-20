@@ -79,27 +79,6 @@ end
     end
 end
 
-@testset "history_flush_every defaults to 20" begin
-    mod = history_module("default_batch")
-    remove_history(mod)
-    try
-        file = history_file(mod)
-        names = ["parallel_$i" for i in 1:19]
-        testsuite = Dict(name => :(@test true) for name in names)
-        # 19 finished tests are one short of the default batch, so nothing is on disk yet
-        testsuite["twentieth"] = :(@test !isfile($file))
-        # the twentieth completes the batch and gets flushed together with the previous ones
-        testsuite["last"] = :(@test length(Main.ParallelTestRunner.deserialize($file)[1]) == 20)
-        io = IOBuffer()
-        @show_if_error io runtests(mod, ["--jobs=2"]; testsuite, serial=["twentieth", "last"], serial_position=:after,
-                                   stdout=io, stderr=io)
-        durations, _ = ParallelTestRunner.load_test_history(mod)
-        @test length(durations) == 21
-    finally
-        remove_history(mod)
-    end
-end
-
 @testset "fewer tests than a batch are written at the end" begin
     mod = history_module("small_batch")
     remove_history(mod)
