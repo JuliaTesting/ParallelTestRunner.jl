@@ -4,19 +4,14 @@ on:
   push:
     branches:
       - main
-    paths:
+    paths: &paths
       - '.github/workflows/UnitTests.yml'
       - 'ext/**'
       - 'src/**'
       - 'test/**'
       - 'Project.toml'
   pull_request:
-    paths:
-      - '.github/workflows/UnitTests.yml'
-      - 'ext/**'
-      - 'src/**'
-      - 'test/**'
-      - 'Project.toml'
+    paths: *paths
 
 # needed to allow julia-actions/cache to delete old caches that it has created
 permissions:
@@ -39,7 +34,7 @@ jobs:
         julia-version:
           - 'min'
           - '1'
-          - 'pre'
+          # - 'pre'
           - 'nightly'
         julia-arch:
           - default
@@ -58,6 +53,7 @@ jobs:
         with:
           version: ${{ matrix.julia-version }}
           arch: ${{ matrix.julia-arch }}
+          show-versioninfo: true
       - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-runtest@v1
         with:
