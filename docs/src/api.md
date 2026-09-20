@@ -62,4 +62,5 @@ They are documented here exclusively for `ParallelTestRunner` developers and con
 ParsedArgs
 WorkerTestSet
 partition_tests
+update_test_history!
 ```
