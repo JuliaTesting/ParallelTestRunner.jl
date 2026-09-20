@@ -111,6 +111,8 @@ function record_test_history!(pending::PTR.Lockable{PendingHistory}, mod::Module
     failed = !(result isa PTR.AbstractTestRecord) || PTR.anynonpass(result[])
     batch = @lock pending begin
         pending[].durations[test] = Float64(duration)
+        # a retried test is recorded once per attempt, and the last one is what counts
+        delete!(failed ? pending[].passed : pending[].failed, test)
         push!(failed ? pending[].failed : pending[].passed, test)
         length(pending[].durations) >= history_flush_every ? take_pending_history!(pending[]) : nothing
     end
