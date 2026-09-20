@@ -33,6 +33,12 @@ addworker
 addworkers
 ```
 
+## Configuration
+
+```@docs
+default_njobs
+```
+
 ## Custom Records
 
 Per-test data is captured in an [`AbstractTestRecord`](@ref). The default
@@ -55,7 +61,6 @@ They are documented here exclusively for `ParallelTestRunner` developers and con
 ```@docs
 ParsedArgs
 WorkerTestSet
-default_njobs
 partition_tests
 update_test_history!
 ```
