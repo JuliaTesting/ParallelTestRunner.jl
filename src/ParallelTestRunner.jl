@@ -16,6 +16,10 @@ import IOCapture
 using Test: DefaultTestSet
 using StyledStrings: Face, @styled_str, addface!
 
+if VERSION >= v"1.13.0-DEV.1044"
+    using Base.ScopedValues
+end
+
 function anynonpass(ts::Test.AbstractTestSet)
     @static if VERSION >= v"1.13.0-DEV.1037"
         return Test.anynonpass(ts)
@@ -58,6 +62,27 @@ function PTRWorker(; exename=Base.julia_cmd()[1], exeflags=String[], env=String[
     stdio_loop(wrkr, io)
     id = Threads.atomic_add!(ID_COUNTER, 1)
     return PTRWorker(wrkr, io, id)
+end
+
+
+# Adapted from `Malt._stdio_loop`, used by PTRWorker
+function stdio_loop(worker::Malt.Worker, io::Lockable)
+    Threads.@spawn while !eof(worker.stdout) && Malt.isrunning(worker)
+        try
+            bytes = readavailable(worker.stdout)
+            @lock io write(io[], bytes)
+        catch
+            break
+        end
+    end
+    Threads.@spawn while !eof(worker.stderr) && Malt.isrunning(worker)
+        try
+            bytes = readavailable(worker.stderr)
+            @lock io write(io[], bytes)
+        catch
+            break
+        end
+    end
 end
 
 worker_id(wrkr::PTRWorker) = wrkr.id
@@ -106,10 +131,6 @@ function with_testset(f, testset)
         end
     end
     return nothing
-end
-
-if VERSION >= v"1.13.0-DEV.1044"
-    using Base.ScopedValues
 end
 
 """
@@ -348,26 +369,6 @@ function truncate_line(line::AbstractString, max_width::Int)
         line = first(line, max(0, max_width - 3)) * "..."
     end
     return line
-end
-
-# Adapted from `Malt._stdio_loop`
-function stdio_loop(worker::Malt.Worker, io::Lockable)
-    Threads.@spawn while !eof(worker.stdout) && Malt.isrunning(worker)
-        try
-            bytes = readavailable(worker.stdout)
-            @lock io write(io[], bytes)
-        catch
-            break
-        end
-    end
-    Threads.@spawn while !eof(worker.stderr) && Malt.isrunning(worker)
-        try
-            bytes = readavailable(worker.stderr)
-            @lock io write(io[], bytes)
-        catch
-            break
-        end
-    end
 end
 
 #
