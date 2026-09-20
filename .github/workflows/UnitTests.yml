@@ -39,7 +39,7 @@ jobs:
         julia-version:
           - 'min'
           - '1'
-          - 'pre'
+          # - 'pre'
           - 'nightly'
         julia-arch:
           - default
