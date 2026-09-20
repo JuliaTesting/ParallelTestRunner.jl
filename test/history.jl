@@ -1,5 +1,5 @@
 using Test
-using ParallelTestRunner: Pidfile, deserialize
+using ParallelTestRunner.TestHistory: Pidfile, deserialize
 
 history_module(name) = Module(Symbol("HistoryTest_", name))
 history_file(mod) = ParallelTestRunner.get_history_file(mod)
@@ -68,7 +68,7 @@ end
         testsuite = Dict(name => :(@test true) for name in names)
         # runs after the parallel batch and inspects the history from inside the worker:
         # the batch of `history_flush_every` tests must already be on disk
-        testsuite["last"] = :(@test length(Main.ParallelTestRunner.deserialize($file)[1]) == $batch)
+        testsuite["last"] = :(@test length(Main.ParallelTestRunner.TestHistory.deserialize($file)[1]) == $batch)
         io = IOBuffer()
         @show_if_error io runtests(mod, ["--jobs=2"]; testsuite, serial=["last"], serial_position=:after,
                                    history_flush_every=batch, stdout=io, stderr=io)
@@ -103,7 +103,7 @@ end
     try
         ParallelTestRunner.save_test_history(mod, (Dict("a" => 1.0), Set{String}()))
         code = """
-            using ParallelTestRunner: Pidfile
+            using ParallelTestRunner.TestHistory: Pidfile
             Pidfile.mkpidlock($(repr(lock_file(mod))); stale_age=60) do
                 println("locked"); flush(stdout)
                 sleep(2)
