@@ -1,3 +1,4 @@
+using Test
 using ParallelTestRunner: Pidfile, deserialize
 
 history_module(name) = Module(Symbol("HistoryTest_", name))
@@ -164,7 +165,7 @@ end
         dead_pid = typemax(Cint) - 1
         write(lock_file(mod), "$dead_pid $(gethostname())")
         backdate!(lock_file(mod), 10 * 60)
-        elapsed = @elapsed ParallelTestRunner.update_test_history!(mod, Dict("a" => 1.0), Set(["a"]), Set{String}())
+        elapsed = @elapsed @test_logs (:warn, r"attempting to remove probably stale pidfile") ParallelTestRunner.update_test_history!(mod, Dict("a" => 1.0), Set(["a"]), Set{String}())
         @test elapsed < 10
         durations, _ = ParallelTestRunner.load_test_history(mod)
         @test durations == Dict("a" => 1.0)
@@ -181,7 +182,7 @@ end
         write(history_file(mod), "not a serialized history")
         history = @test_logs (:warn, r"Failed to load test history") ParallelTestRunner.load_test_history(mod)
         @test history == (Dict{String, Float64}(), Set{String}())
-        ParallelTestRunner.update_test_history!(mod, Dict("a" => 1.0), Set(["a"]), Set{String}())
+        @test_logs (:warn, r"Failed to load test history") ParallelTestRunner.update_test_history!(mod, Dict("a" => 1.0), Set(["a"]), Set{String}())
         @test ParallelTestRunner.load_test_history(mod) == (Dict("a" => 1.0), Set{String}())
     finally
         remove_history(mod)
