@@ -646,8 +646,6 @@ end
 # Outcomes of finished tests waiting to be merged into the history file. Writing them in
 # batches keeps the number of lock, write and rename operations low on slow filesystems, while
 # an interrupted run still keeps all but the last few measurements.
-history_flush_every::Int = 20
-
 struct PendingHistory
     durations::Dict{String, Float64}
     passed::Set{String}
@@ -655,7 +653,8 @@ struct PendingHistory
 end
 PendingHistory() = PendingHistory(Dict{String, Float64}(), Set{String}(), Set{String}())
 
-function record_test_history!(pending::Lockable{PendingHistory}, mod::Module, test::String, result, duration::Real)
+function record_test_history!(pending::Lockable{PendingHistory}, mod::Module, test::String, result, duration::Real;
+                              history_flush_every::Integer)
     failed = !(result isa AbstractTestRecord) || anynonpass(result[])
     batch = @lock pending begin
         pending[].durations[test] = Float64(duration)
@@ -1009,7 +1008,8 @@ end
              serial = String[],
              serial_position::Symbol = :before,
              recycle_on_failure::Bool = false,
-             retries::Integer = 0)
+             retries::Integer = 0,
+             history_flush_every::Integer = 20)
     runtests(mod::Module, ARGS; ...)
 
 Run Julia tests in parallel across multiple worker processes.
@@ -1065,6 +1065,11 @@ Several keyword arguments are also supported:
   (default: `false`). See the Failure Handling section below.
 - `retries`: How many times to re-run tests that did not pass after the main run completes
   (default: `0`). See the Failure Handling section below.
+- `history_flush_every`: How many finished tests to accumulate before merging their
+  durations and outcomes into the on-disk test history (default: `20`); whatever is left is
+  written when the run ends. Larger values mean fewer lock, write and rename operations,
+  which matters on slow filesystems, while an interrupted run loses at most that many
+  measurements.
 
 ## Command Line Options
 
@@ -1173,6 +1178,7 @@ function runtests(mod::Module, args::ParsedArgs;
                   memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
                   recycle_on_failure::Bool = false,
                   retries::Integer = 0,
+                  history_flush_every::Integer = 20,
                   )
     #
     # set-up
@@ -1238,6 +1244,7 @@ function runtests(mod::Module, args::ParsedArgs;
         memory_per_worker,
         recycle_on_failure,
         retries,
+        history_flush_every,
     )
 end
 
@@ -1263,6 +1270,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                    memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
                    recycle_on_failure::Bool = false,
                    retries::Integer = 0,
+                   history_flush_every::Integer = 20,
                    )
 
     # partition into serial and parallel groups
@@ -1631,7 +1639,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                               retry_mode && filter!(r -> r.test != test, results[])
                               push!(results[], (; test, result, output, test_t0, test_t1))
                           end
-                          record_test_history!(pending_history, mod, test, result, test_t1 - test_t0)
+                          record_test_history!(pending_history, mod, test, result, test_t1 - test_t0; history_flush_every)
 
                           # act on the results
                           if result isa AbstractTestRecord

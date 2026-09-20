@@ -63,16 +63,38 @@ end
     remove_history(mod)
     try
         file = history_file(mod)
-        batch = ParallelTestRunner.history_flush_every
+        batch = 3
         names = ["parallel_$i" for i in 1:batch]
         testsuite = Dict(name => :(@test true) for name in names)
         # runs after the parallel batch and inspects the history from inside the worker:
         # the batch of `history_flush_every` tests must already be on disk
         testsuite["last"] = :(@test length(Main.ParallelTestRunner.deserialize($file)[1]) == $batch)
         io = IOBuffer()
-        @show_if_error io runtests(mod, ["--jobs=2"]; testsuite, serial=["last"], serial_position=:after, stdout=io, stderr=io)
+        @show_if_error io runtests(mod, ["--jobs=2"]; testsuite, serial=["last"], serial_position=:after,
+                                   history_flush_every=batch, stdout=io, stderr=io)
         durations, _ = ParallelTestRunner.load_test_history(mod)
         @test Set(keys(durations)) == Set([names; "last"])
+    finally
+        remove_history(mod)
+    end
+end
+
+@testset "history_flush_every defaults to 20" begin
+    mod = history_module("default_batch")
+    remove_history(mod)
+    try
+        file = history_file(mod)
+        names = ["parallel_$i" for i in 1:19]
+        testsuite = Dict(name => :(@test true) for name in names)
+        # 19 finished tests are one short of the default batch, so nothing is on disk yet
+        testsuite["twentieth"] = :(@test !isfile($file))
+        # the twentieth completes the batch and gets flushed together with the previous ones
+        testsuite["last"] = :(@test length(Main.ParallelTestRunner.deserialize($file)[1]) == 20)
+        io = IOBuffer()
+        @show_if_error io runtests(mod, ["--jobs=2"]; testsuite, serial=["twentieth", "last"], serial_position=:after,
+                                   stdout=io, stderr=io)
+        durations, _ = ParallelTestRunner.load_test_history(mod)
+        @test length(durations) == 21
     finally
         remove_history(mod)
     end
