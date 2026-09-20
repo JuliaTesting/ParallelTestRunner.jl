@@ -58,6 +58,34 @@ end
     end
 end
 
+@testset "a test passing on its retry is not marked as failed" begin
+    mod = history_module("retry")
+    remove_history(mod)
+    try
+        mktempdir() do dir
+            # fails on the first attempt, passes on the retry; both attempts land in the same
+            # pending batch, so the retry has to override the failed attempt in memory
+            marker = joinpath(dir, "flaky")
+            testsuite = Dict("flaky" => quote
+                if isfile($marker)
+                    @test true
+                else
+                    touch($marker)
+                    @test false
+                end
+            end)
+            io = IOBuffer()
+            @show_if_error io runtests(mod, ["--jobs=1"]; testsuite, retries=1, stdout=io, stderr=io)
+
+            durations, failures = ParallelTestRunner.load_test_history(mod)
+            @test haskey(durations, "flaky")
+            @test isempty(failures)
+        end
+    finally
+        remove_history(mod)
+    end
+end
+
 @testset "history is written in batches during the run" begin
     mod = history_module("batches")
     remove_history(mod)
