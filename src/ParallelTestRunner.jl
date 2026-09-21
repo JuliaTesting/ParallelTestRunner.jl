@@ -23,7 +23,7 @@ include("compatutils.jl")
 # PTRWorker, worker_id, test_exe, addworkers, addworker
 include("ptrworker.jl")
 
-# ParsedArgs, extract_flag!, parse_args, filter_tests!, partition_tests
+# find_tests, ParsedArgs, extract_flag!, parse_args, filter_tests!, partition_tests
 include("args.jl")
 
 include("history.jl")
@@ -431,49 +431,6 @@ function default_njobs(;
     )
     memory_jobs = Int64(_free_memory) ÷ memory_per_worker
     return max(1, min(_cpu_threads, memory_jobs))
-end
-
-"""
-    find_tests(dir::String) -> Dict{String, Expr}
-
-Discover test files in a directory and return a test suite dictionary.
-
-Walks through `dir` and finds all `.jl` files (excluding `runtests.jl`), returning a
-dictionary mapping test names to expression that include each test file.
-"""
-function find_tests(dir::String)
-    tests = Dict{String, Expr}()
-    for (rootpath, _dirs, files) in walkdir(dir)
-        # find Julia files
-        filter!(files) do file
-            endswith(file, ".jl") && file !== "runtests.jl"
-        end
-        isempty(files) && continue
-
-        # strip extension
-        files = map(files) do file
-            file[1:(end - 3)]
-        end
-
-        # prepend subdir
-        subdir = relpath(rootpath, dir)
-        if subdir != "."
-            files = map(files) do file
-                joinpath(subdir, file)
-            end
-        end
-
-        # unify path separators
-        files = map(files) do file
-            replace(file, path_separator => '/')
-        end
-
-        for file in files
-            path = joinpath(rootpath, basename(file * ".jl"))
-            tests[file] = :(include($path))
-        end
-    end
-    return tests
 end
 
 """
