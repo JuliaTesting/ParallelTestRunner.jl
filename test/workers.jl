@@ -218,7 +218,8 @@ end
     end
 
     # every test after the first on the worker is slow to init
-    slow_init = ceil(Int, 1.5 * ParallelTestRunner.SLOW_INIT_FACTOR * cold_init_time[]) + 1
+    slow_init = ceil(Int, max(1.5 * ParallelTestRunner.SLOW_INIT_FACTOR * cold_init_time[],
+                              ParallelTestRunner.SLOW_INIT_MIN_TIME)) + 1
     init_code = quote
         Main.slow_init_counter[] += 1
         Main.slow_init_counter[] > 1 && sleep($slow_init)

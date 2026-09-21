@@ -149,8 +149,11 @@ function init_time(rec::AbstractTestRecord)
     return base.total_time - base.time
 end
 
-# the user is warned once a warm worker's init time exceeds this multiple of the cold-start cost
+# the user is warned once a warm worker's init time exceeds this multiple of the cold-start cost...
 const SLOW_INIT_FACTOR = 2
+# ... but only if it also exceeds this many seconds, to avoid false positives in test suites
+# with a short cold worker init
+const SLOW_INIT_MIN_TIME = 10.0
 
 function Base.getindex(rec::AbstractTestRecord)
     return parent(rec).value
@@ -1574,7 +1577,8 @@ function _runtests(mod::Module, args::ParsedArgs;
                               # the pre-test full GC has become much slower than spawning a
                               # new worker, which typically means there are too many workers
                               # for the available memory (e.g. macOS memory pressure, #124)
-                              slow_init = wrkr === p && !fresh_worker && init_time(result) > SLOW_INIT_FACTOR * cold_init_time[]
+                              slow_init = wrkr === p && !fresh_worker &&
+                                          init_time(result) > max(SLOW_INIT_FACTOR * cold_init_time[], SLOW_INIT_MIN_TIME)
                               # recycle a pool worker so future tests start with a smaller working
                               # set, or so that a failing test that may have left the worker in a
                               # bad state (e.g. a wedged GPU driver) cannot poison later tests
