@@ -107,12 +107,6 @@ function init_time(rec::AbstractTestRecord)
     return base.total_time - base.time
 end
 
-# the user is warned once a warm worker's init time exceeds this multiple of the cold-start cost...
-const SLOW_INIT_FACTOR = 2
-# ... but only if it also exceeds this many seconds, to avoid false positives in test suites
-# with a short cold worker init
-const SLOW_INIT_MIN_TIME = 10.0
-
 function Base.getindex(rec::AbstractTestRecord)
     return parent(rec).value
 end
@@ -932,6 +926,12 @@ function runtests(mod::Module, args::ParsedArgs;
         history_flush_every,
     )
 end
+
+# the user is warned once a warm worker's init time exceeds this multiple of the cold-start cost...
+const SLOW_INIT_FACTOR = 2
+# ... but only if it also exceeds this many seconds, to avoid false positives in test suites
+# with a short cold worker init
+const SLOW_INIT_MIN_TIME = 10.0
 
 # Helper function, to be used for testing, with `tests` already sorted.
 function _runtests(mod::Module, args::ParsedArgs;
