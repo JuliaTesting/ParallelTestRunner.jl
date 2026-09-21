@@ -23,6 +23,9 @@ include("compatutils.jl")
 # PTRWorker, worker_id, test_exe, addworkers, addworker
 include("ptrworker.jl")
 
+include("history.jl")
+using .TestHistory
+
 # Always set the max rss so that if tests add large global variables
 #  (which they do) we don't make the GC's life too hard. Apple's memory
 #  management makes setting this value more complicated than it should
@@ -426,9 +429,6 @@ function default_njobs(;
     memory_jobs = Int64(_free_memory) ÷ memory_per_worker
     return max(1, min(_cpu_threads, memory_jobs))
 end
-
-include("history.jl")
-using .TestHistory
 
 """
     find_tests(dir::String) -> Dict{String, Expr}
