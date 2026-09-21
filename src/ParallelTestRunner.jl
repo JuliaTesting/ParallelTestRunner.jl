@@ -353,7 +353,7 @@ function execute(::Type{TestRecord}, mod::Module, f, name, start_time, _custom_a
         GC.gc(true)
         Random.seed!(1)
 
-        # @testset CustomTestRecord switches the all lower-level testset to our custom testset,
+        # @testset CustomTestSet switches the all lower-level testset to our custom testset,
         # so we need to have two layers here such that the user-defined testsets are using `DefaultTestSet`.
         # This also guarantees our invariant about `WorkerTestSet` containing a single `DefaultTestSet`.
         stats = @timed @testset WorkerTestSet "placeholder" begin
