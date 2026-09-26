@@ -272,6 +272,15 @@ function runtests(mod::Module, args::ParsedArgs;
     # filter tests
     filter_tests!(testsuite, args)
 
+    # remove tests that previously passed
+    if args.skippassed !== nothing
+        for test in keys(testsuite)
+            if test in keys(historical_durations) && test ∉ historical_failures
+                delete!(testsuite, test)
+            end
+        end
+    end
+
     # filter serial list to only include tests that survived filtering
     serial = filter(t -> haskey(testsuite, t), serial)
 

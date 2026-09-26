@@ -63,6 +63,7 @@ struct ParsedArgs
     verbose::Union{Some{Nothing}, Nothing}
     quickfail::Union{Some{Nothing}, Nothing}
     list::Union{Some{Nothing}, Nothing}
+    skippassed::Union{Some{Nothing}, Nothing}
 
     custom::Dict{String,Any}
 
@@ -145,6 +146,7 @@ function parse_args(args; custom::Array{String} = String[])
     verbose = extract_flag!(args, "--verbose")
     quickfail = extract_flag!(args, "--quickfail")
     list = extract_flag!(args, "--list")
+    skippassed = extract_flag!(args, "--skippassed")
 
     # boolean flags don't take values
     for (flag, val) in (("--verbose", verbose), ("--quickfail", quickfail), ("--list", list))
@@ -164,7 +166,7 @@ function parse_args(args; custom::Array{String} = String[])
         error("Unknown test options `$(join(optlike_args, " "))` (try `--help` for usage instructions)")
     end
 
-    return ParsedArgs(jobs, verbose, quickfail, list, custom_args, args)
+    return ParsedArgs(jobs, verbose, quickfail, list, skippassed, custom_args, args)
 end
 
 """
