@@ -242,9 +242,11 @@ function runtests(mod::Module, args::ParsedArgs;
     # set-up
     #
 
+
+    historical_durations, historical_failures = load_test_history(mod, history_key)
+
     # list tests, if requested
     if args.list !== nothing
-        historical_durations, historical_failures = load_test_history(mod, history_key)
         sorted_tests = sort(collect(keys(testsuite)))
         name_align = isempty(sorted_tests) ? 0 : maximum(textwidth, sorted_tests)
         duration_strs = Dict(
@@ -270,13 +272,21 @@ function runtests(mod::Module, args::ParsedArgs;
     # filter tests
     filter_tests!(testsuite, args)
 
+    # remove tests that previously passed
+    if args.skippassed !== nothing
+        for test in keys(testsuite)
+            if test in keys(historical_durations) && test ∉ historical_failures
+                delete!(testsuite, test)
+            end
+        end
+    end
+
     # filter serial list to only include tests that survived filtering
     serial = filter(t -> haskey(testsuite, t), serial)
 
     # determine test order
     tests = collect(keys(testsuite))
     Random.shuffle!(tests)
-    historical_durations, historical_failures = load_test_history(mod, history_key)
     get_historical_duration(test) = TestHistoryEntry(get(historical_durations, test, Inf), test in historical_failures)
     sort!(tests, by = x -> get_historical_duration(x), rev = true)
 
