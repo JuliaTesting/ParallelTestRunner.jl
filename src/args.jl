@@ -146,7 +146,7 @@ function parse_args(args; custom::Array{String} = String[])
     verbose = extract_flag!(args, "--verbose")
     quickfail = extract_flag!(args, "--quickfail")
     list = extract_flag!(args, "--list")
-    skippassed = extract_flag!(args, "--skippassed")
+    skippassed = extract_flag!(args, "--skippassed") # Experimental
 
     # boolean flags don't take values
     for (flag, val) in (("--verbose", verbose), ("--quickfail", quickfail), ("--list", list))
