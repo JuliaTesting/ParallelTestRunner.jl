@@ -57,7 +57,7 @@ include("execute.jl")
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss(),
              memory_per_worker = 2 * 2^30,
-             max_default_jobs = nothing,
+             max_default_jobs = typemax(Int64),
              serial = String[],
              serial_position::Symbol = :before,
              recycle_on_failure::Bool = false,
@@ -238,7 +238,7 @@ function runtests(mod::Module, args::ParsedArgs;
                   stderr = Base.stderr,
                   max_worker_rss = get_max_worker_rss(),
                   memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
-                  max_default_jobs = nothing,
+                  max_default_jobs = DEFAULT_MAX_DEFAULT_JOBS,
                   recycle_on_failure::Bool = false,
                   retries::Integer = 0,
                   history_flush_every::Integer = 20,
@@ -351,7 +351,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                    stderr = Base.stderr,
                    max_worker_rss = get_max_worker_rss(),
                    memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
-                   max_default_jobs = nothing,
+                   max_default_jobs = DEFAULT_MAX_DEFAULT_JOBS,
                    recycle_on_failure::Bool = false,
                    retries::Integer = 0,
                    history_flush_every::Integer = 20,
@@ -362,14 +362,8 @@ function _runtests(mod::Module, args::ParsedArgs;
 
     # determine parallelism
     env_jobs = tryparse(Int, get(ENV, "PTR_NUM_JOBS", ""))
-    if max_default_jobs !== nothing
-        max_default_jobs isa Integer && !(max_default_jobs isa Bool) && max_default_jobs >= 1 ||
-            throw(ArgumentError("`max_default_jobs` must be a positive integer, got $(repr(max_default_jobs))"))
-    end
-    _jobs = @something args.jobs env_jobs begin
-        default_jobs = default_njobs(; memory_per_worker)
-        max_default_jobs === nothing ? default_jobs : min(default_jobs, max_default_jobs)
-    end
+
+    _jobs = _jobs = @something args.jobs env_jobs default_njobs(; memory_per_worker, max_default_jobs)
     jobs = clamp(_jobs, 1, max(1, length(parallel_tests)))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs
