@@ -56,7 +56,8 @@ include("execute.jl")
              stdout = Base.stdout,
              stderr = Base.stderr,
              max_worker_rss = get_max_worker_rss(),
-             memory_per_worker = 2 * 2^30)
+             memory_per_worker = 2 * 2^30,
+             max_default_jobs = nothing,
              serial = String[],
              serial_position::Symbol = :before,
              recycle_on_failure::Bool = false,
@@ -111,6 +112,10 @@ Several keyword arguments are also supported:
   Packages whose tests use less memory can pass a smaller value to increase the default
   parallelism. Ignored when the number of jobs is set explicitly via `--jobs=N` or the
   `PTR_NUM_JOBS` environment variable.
+- `max_default_jobs`: Upper bound on the default number of jobs, for resources that PTR
+  does not account for itself, such as the memory of a GPU shared between workers
+  (default: `nothing`, no bound). Like `memory_per_worker`, it is ignored when the
+  number of jobs is set explicitly via `--jobs=N` or the `PTR_NUM_JOBS` environment variable.
 - `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time
   instead of in parallel.
 - `serial_position`: When to run serial tests relative to the parallel batch.
@@ -233,6 +238,7 @@ function runtests(mod::Module, args::ParsedArgs;
                   stderr = Base.stderr,
                   max_worker_rss = get_max_worker_rss(),
                   memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
+                  max_default_jobs = nothing,
                   recycle_on_failure::Bool = false,
                   retries::Integer = 0,
                   history_flush_every::Integer = 20,
@@ -311,6 +317,7 @@ function runtests(mod::Module, args::ParsedArgs;
         stderr,
         max_worker_rss,
         memory_per_worker,
+        max_default_jobs,
         recycle_on_failure,
         retries,
         history_flush_every,
@@ -344,6 +351,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                    stderr = Base.stderr,
                    max_worker_rss = get_max_worker_rss(),
                    memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
+                   max_default_jobs = nothing,
                    recycle_on_failure::Bool = false,
                    retries::Integer = 0,
                    history_flush_every::Integer = 20,
@@ -354,7 +362,14 @@ function _runtests(mod::Module, args::ParsedArgs;
 
     # determine parallelism
     env_jobs = tryparse(Int, get(ENV, "PTR_NUM_JOBS", ""))
-    _jobs = @something args.jobs env_jobs default_njobs(; memory_per_worker)
+    if max_default_jobs !== nothing
+        max_default_jobs isa Integer && !(max_default_jobs isa Bool) && max_default_jobs >= 1 ||
+            throw(ArgumentError("`max_default_jobs` must be a positive integer, got $(repr(max_default_jobs))"))
+    end
+    _jobs = @something args.jobs env_jobs begin
+        default_jobs = default_njobs(; memory_per_worker)
+        max_default_jobs === nothing ? default_jobs : min(default_jobs, max_default_jobs)
+    end
     jobs = clamp(_jobs, 1, max(1, length(parallel_tests)))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs
