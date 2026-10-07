@@ -238,7 +238,13 @@ runtests(MyPackage, ARGS; memory_per_worker = 2^30) # 1 GiB per worker
 Workers are recycled once they exceed the `JULIA_TEST_MAXRSS_MB` environment variable (or the `max_worker_rss` keyword).
 Lowering it keeps memory pressure in check, which can make it possible to run more workers than would otherwise be safe.
 
-The number of jobs can also be forced with `--jobs=N` or the `PTR_NUM_JOBS` environment variable, but this bypasses the memory check entirely.
+Resources that PTR does not know about, such as the memory of a GPU shared by all workers, can be accounted for by passing an upper bound on the default with `max_default_jobs`:
+
+```julia
+runtests(MyPackage, ARGS; max_default_jobs = gpu_free ÷ gpu_memory_per_worker)
+```
+
+The number of jobs can also be forced with `--jobs=N` or the `PTR_NUM_JOBS` environment variable, but this bypasses the memory check and `max_default_jobs` entirely.
 
 More jobs is not always faster: once the machine runs out of memory the whole suite slows down, sometimes enough to time out a CI job.
 This has been especially problematic on low-memory macOS machines (notably CI runners), where memory compression makes each garbage collection slower.

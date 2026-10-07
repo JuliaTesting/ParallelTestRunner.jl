@@ -69,6 +69,40 @@ end
         runtests(ParallelTestRunner, ["--jobs=1"]; testsuite, stdout=io, stderr=io)
     end
     @test contains(String(take!(io)), "using 1 parallel jobs")
+
+    # max_default_jobs bounds the default, but not explicit settings
+    if ParallelTestRunner.default_njobs() >= 2
+        io = IOBuffer()
+        withenv("PTR_NUM_JOBS" => nothing) do
+            runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io)
+        end
+        @test !contains(String(take!(io)), "using 1 parallel jobs")
+    end
+    io = IOBuffer()
+    withenv("PTR_NUM_JOBS" => nothing) do
+        runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io,
+                 max_default_jobs=1)
+    end
+    @test contains(String(take!(io)), "using 1 parallel jobs")
+
+    io = IOBuffer()
+    withenv("PTR_NUM_JOBS" => nothing) do
+        runtests(ParallelTestRunner, ["--jobs=2"]; testsuite, stdout=io, stderr=io,
+                 max_default_jobs=1)
+    end
+    @test contains(String(take!(io)), "using 2 parallel jobs")
+
+    io = IOBuffer()
+    withenv("PTR_NUM_JOBS" => "2") do
+        runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io,
+                 max_default_jobs=1)
+    end
+    @test contains(String(take!(io)), "using 2 parallel jobs")
+
+    for bad in (0, -1, true, 1.5, "2")
+        @test_throws ArgumentError runtests(ParallelTestRunner, String[]; testsuite,
+                                            stdout=io, stderr=io, max_default_jobs=bad)
+    end
 end
 
 @testset "subdir use" begin
