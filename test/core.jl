@@ -99,8 +99,12 @@ end
     end
     @test contains(String(take!(io)), "using 2 parallel jobs")
 
-    for bad in (0, -1, true, 1.5, "2")
+    for badint in (0, -1, true)
         @test_throws ArgumentError runtests(ParallelTestRunner, String[]; testsuite,
+                                            stdout=io, stderr=io, max_default_jobs=badint)
+    end
+    for bad in (1.5, "2")
+        @test_throws TypeError runtests(ParallelTestRunner, String[]; testsuite,
                                             stdout=io, stderr=io, max_default_jobs=bad)
     end
 end

@@ -35,6 +35,7 @@ end
 # memory). Packages whose tests are heavier can pass a larger
 # `memory_per_worker` to `runtests`.
 const DEFAULT_MEMORY_PER_WORKER = 2 * Int64(2)^30
+const DEFAULT_MAX_DEFAULT_JOBS = typemax(Int64)
 
 """
     default_njobs(; memory_per_worker = 2 * 2^30)
@@ -45,10 +46,14 @@ bytes of the available system memory.
 """
 function default_njobs(;
         memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
+        max_default_jobs::Integer = DEFAULT_MAX_DEFAULT_JOBS,
         # Just use Sys.EFFECTIVE_CPU_THREADS when min VERSION >= v"1.13"
         _cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
         _free_memory = available_memory(),
     )
+    !(max_default_jobs isa Bool) && max_default_jobs >= 1 ||
+        throw(ArgumentError("`max_default_jobs` must be a positive integer, got $(repr(max_default_jobs))"))
+
     memory_jobs = Int64(_free_memory) ÷ memory_per_worker
-    return max(1, min(_cpu_threads, memory_jobs))
+    return max(1, min(_cpu_threads, memory_jobs, max_default_jobs))
 end
