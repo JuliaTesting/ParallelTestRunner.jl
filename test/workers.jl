@@ -277,12 +277,12 @@ function pid_running(pid)
     @static if Sys.iswindows()
         SYNCHRONIZE = 0x00100000
         WAIT_TIMEOUT = 0x00000102
-        handle = @ccall "kernel32".OpenProcess(SYNCHRONIZE::UInt32, false::Cint,
-                                               pid::UInt32)::Ptr{Cvoid}
+        handle = ccall((:OpenProcess, "kernel32"), stdcall, Ptr{Cvoid},
+                       (UInt32, Cint, UInt32), SYNCHRONIZE, false, pid)
         handle == C_NULL && return false
-        running = (@ccall "kernel32".WaitForSingleObject(handle::Ptr{Cvoid},
-                                                         0::UInt32)::UInt32) == WAIT_TIMEOUT
-        @ccall "kernel32".CloseHandle(handle::Ptr{Cvoid})::Cint
+        running = ccall((:WaitForSingleObject, "kernel32"), stdcall, UInt32,
+                        (Ptr{Cvoid}, UInt32), handle, 0) == WAIT_TIMEOUT
+        ccall((:CloseHandle, "kernel32"), stdcall, Cint, (Ptr{Cvoid},), handle)
         return running
     else
         (@ccall kill(pid::Cint, 0::Cint)::Cint) == 0 || return false
