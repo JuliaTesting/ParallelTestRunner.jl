@@ -286,14 +286,14 @@ function pid_running(pid)
         return running
     else
         (@ccall kill(pid::Cint, 0::Cint)::Cint) == 0 || return false
-        # a killed orphan may linger as a zombie until it's reaped
-        Sys.islinux() || return true
+        # a killed worker lingers as a zombie until it's reaped, which doesn't happen while
+        # the manager hangs on exit, as on Julia v1.10
         stat = try
-            read("/proc/$(pid)/stat", String)
+            readchomp(`ps -o stat= -p $(pid)`)
         catch
             return false
         end
-        return split(stat[findlast(')', stat)+1:end])[1] != "Z"
+        return !startswith(stat, 'Z')
     end
 end
 
