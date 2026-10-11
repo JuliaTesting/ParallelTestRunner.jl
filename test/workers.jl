@@ -311,7 +311,7 @@ end
         """
     cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) -e $script`
     # SIGKILL can't be handled by the manager, so we rely on the OS to kill the workers
-    kill_supported = Sys.islinux() || Sys.isfreebsd() || (Sys.iswindows() && Sys.WORD_SIZE == 64)
+    kill_supported = Sys.islinux() || Sys.isfreebsd() || Sys.iswindows()
     @testset "$(signum == Base.SIGKILL ? "SIGKILL" : "SIGTERM")" for signum in (Base.SIGTERM, Base.SIGKILL)
         if signum == Base.SIGKILL && !kill_supported
             @test_skip false
