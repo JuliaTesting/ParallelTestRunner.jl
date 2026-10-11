@@ -150,7 +150,7 @@ Press `Ctrl+C` to interrupt the test run. The framework will:
 ### Workers Don't Outlive the Test Run
 
 Workers are stopped when the main process exits, also when it's terminated with `SIGTERM`, as
-CI services do when a job is cancelled. On Linux, FreeBSD and 64-bit Windows they're killed
+CI services do when a job is cancelled. On Linux, FreeBSD and Windows they're killed
 by the operating system even when the main process is killed abruptly, e.g. with `SIGKILL`,
 including while they're busy running a test; on macOS that isn't possible, so a worker in that
 situation is left running until its test completes.

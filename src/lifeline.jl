@@ -46,9 +46,9 @@ function arm_manager_death!(manager_pid::Integer)
     end
 end
 
-@static if Sys.iswindows() && Sys.WORD_SIZE == 64
+@static if Sys.iswindows()
 
-# `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` on 64-bit Windows
+# `JOBOBJECT_EXTENDED_LIMIT_INFORMATION`, 144 bytes on 64-bit Windows, 112 on 32-bit
 struct JobObjectExtendedLimitInformation
     # JOBOBJECT_BASIC_LIMIT_INFORMATION
     per_process_user_time_limit::Int64
@@ -78,17 +78,20 @@ const PROCESS_SET_QUOTA = UInt32(0x0100)
 const WORKERS_JOB = Lockable(Ref(C_NULL))
 
 function create_workers_job()
-    job = @ccall "kernel32".CreateJobObjectW(C_NULL::Ptr{Cvoid}, C_NULL::Ptr{Cvoid})::Ptr{Cvoid}
+    sizeof(JobObjectExtendedLimitInformation) == (Sys.WORD_SIZE == 64 ? 144 : 112) ||
+        return C_NULL
+    job = ccall((:CreateJobObjectW, "kernel32"), stdcall, Ptr{Cvoid},
+                (Ptr{Cvoid}, Ptr{Cvoid}), C_NULL, C_NULL)
     job == C_NULL && return C_NULL
     info = Ref(JobObjectExtendedLimitInformation(0, 0, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
                                                  0, 0, 0, 0, 0, 0, ntuple(_ -> 0, 6),
                                                  0, 0, 0, 0))
-    ok = @ccall "kernel32".SetInformationJobObject(
-        job::Ptr{Cvoid}, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS::Cint,
-        info::Ptr{JobObjectExtendedLimitInformation},
-        sizeof(JobObjectExtendedLimitInformation)::UInt32)::Cint
+    ok = ccall((:SetInformationJobObject, "kernel32"), stdcall, Cint,
+               (Ptr{Cvoid}, Cint, Ptr{JobObjectExtendedLimitInformation}, UInt32),
+               job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS, info,
+               sizeof(JobObjectExtendedLimitInformation))
     if ok == 0
-        @ccall "kernel32".CloseHandle(job::Ptr{Cvoid})::Cint
+        ccall((:CloseHandle, "kernel32"), stdcall, Cint, (Ptr{Cvoid},), job)
         return C_NULL
     end
     return job
@@ -102,12 +105,12 @@ function assign_to_workers_job(pid::Integer)
         WORKERS_JOB[][]
     end
     job == C_NULL && return false
-    process = @ccall "kernel32".OpenProcess((PROCESS_TERMINATE | PROCESS_SET_QUOTA)::UInt32,
-                                            false::Cint, pid::UInt32)::Ptr{Cvoid}
+    process = ccall((:OpenProcess, "kernel32"), stdcall, Ptr{Cvoid}, (UInt32, Cint, UInt32),
+                    PROCESS_TERMINATE | PROCESS_SET_QUOTA, false, pid)
     process == C_NULL && return false
-    ok = @ccall "kernel32".AssignProcessToJobObject(job::Ptr{Cvoid},
-                                                    process::Ptr{Cvoid})::Cint
-    @ccall "kernel32".CloseHandle(process::Ptr{Cvoid})::Cint
+    ok = ccall((:AssignProcessToJobObject, "kernel32"), stdcall, Cint,
+               (Ptr{Cvoid}, Ptr{Cvoid}), job, process)
+    ccall((:CloseHandle, "kernel32"), stdcall, Cint, (Ptr{Cvoid},), process)
     return ok != 0
 end
 
