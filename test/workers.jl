@@ -272,6 +272,76 @@ end
     @test ParallelTestRunner.ID_COUNTER[] == old_id_counter + 3
 end
 
+# whether the process with PID `pid` is still running
+function pid_running(pid)
+    @static if Sys.iswindows()
+        SYNCHRONIZE = 0x00100000
+        WAIT_TIMEOUT = 0x00000102
+        handle = ccall((:OpenProcess, "kernel32"), stdcall, Ptr{Cvoid},
+                       (UInt32, Cint, UInt32), SYNCHRONIZE, false, pid)
+        handle == C_NULL && return false
+        running = ccall((:WaitForSingleObject, "kernel32"), stdcall, UInt32,
+                        (Ptr{Cvoid}, UInt32), handle, 0) == WAIT_TIMEOUT
+        ccall((:CloseHandle, "kernel32"), stdcall, Cint, (Ptr{Cvoid},), handle)
+        return running
+    else
+        (@ccall kill(pid::Cint, 0::Cint)::Cint) == 0 || return false
+        # a killed worker lingers as a zombie until it's reaped, which doesn't happen while
+        # the manager hangs on exit, as on Julia v1.10
+        stat = try
+            readchomp(`ps -o stat= -p $(pid)`)
+        catch
+            return false
+        end
+        return !startswith(stat, 'Z')
+    end
+end
+
+@testset "workers die with the manager" begin
+    script = """
+        using ParallelTestRunner
+        const Malt = ParallelTestRunner.Malt
+        workers = addworkers(2)
+        for w in workers
+            # keep the worker busy, so that it can't notice by itself that the manager is gone
+            Malt.remote_eval(Main, w.w, :(let x = 0; while true; x += 1; end; end))
+        end
+        println(join([w.w.proc_pid for w in workers], ' '))
+        sleep(600)
+        """
+    cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) -e $script`
+    # SIGKILL can't be handled by the manager, so we rely on the OS to kill the workers
+    kill_supported = Sys.islinux() || Sys.isfreebsd() || Sys.iswindows()
+    @testset "$(signum == Base.SIGKILL ? "SIGKILL" : "SIGTERM")" for signum in (Base.SIGTERM, Base.SIGKILL)
+        if signum == Base.SIGKILL && !kill_supported
+            @test_skip false
+            continue
+        end
+        manager = open(pipeline(cmd; stderr=devnull))
+        pids = parse.(Int, split(readline(manager)))
+        try
+            @test length(pids) == 2
+            @test all(pid_running, pids)
+            kill(manager, signum)
+            # on SIGTERM the manager stops its workers without waiting for them too long,
+            # except on Julia v1.10, where it hangs after running its `atexit` hooks
+            if signum == Base.SIGKILL || VERSION >= v"1.11"
+                @test timedwait(() -> process_exited(manager), 15) === :ok
+            end
+            @test timedwait(() -> !any(pid_running, pids), 10) === :ok
+        finally
+            kill(manager, Base.SIGKILL)
+            for pid in filter(pid_running, pids)
+                @static if Sys.iswindows()
+                    run(ignorestatus(`taskkill /F /PID $(pid)`))
+                else
+                    @ccall kill(pid::Cint, Base.SIGKILL::Cint)::Cint
+                end
+            end
+        end
+    end
+end
+
 # All workers must have been stopped once `runtests` returns.
 @testset "no workers running" begin
     children = _count_child_pids()

@@ -38,7 +38,10 @@ end
 
 worker_id(wrkr::PTRWorker) = wrkr.id
 Malt.isrunning(wrkr::PTRWorker) = Malt.isrunning(wrkr.w)
-Malt.stop(wrkr::PTRWorker) = Malt.stop(wrkr.w)
+function Malt.stop(wrkr::PTRWorker)
+    unbind_worker!(wrkr)
+    return Malt.stop(wrkr.w)
+end
 
 
 function test_exe(color::Bool=false)
@@ -103,6 +106,7 @@ function addworker(;
     # need it to reference `AbstractTestRecord`, `execute`, etc. when defining
     # custom record types.
     Malt.remote_eval_wait(Main, wrkr.w, :(import ParallelTestRunner))
+    bind_worker!(wrkr)
     if init_worker_code != :()
         Malt.remote_eval_wait(Main, wrkr.w, init_worker_code)
     end
