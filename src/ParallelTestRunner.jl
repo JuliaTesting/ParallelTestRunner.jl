@@ -23,6 +23,9 @@ include("compatutils.jl")
 # PTRWorker, worker_id, test_exe, addworkers, addworker
 include("ptrworker.jl")
 
+# arm_manager_death!, bind_worker!, unbind_worker!
+include("lifeline.jl")
+
 # find_tests, ParsedArgs, extract_flag!, parse_args, filter_tests!, partition_tests
 include("args.jl")
 
