@@ -67,6 +67,25 @@ end
     @test contains(str, "SUCCESS")
 end
 
+@testset "worker that fails to start" begin
+    # a launcher whose first worker fails before reporting its port, like one that misses
+    # Malt's deadline on a loaded system (printing something else fails it right away)
+    marker = tempname()
+    launcher = """
+        marker = popfirst!(ARGS)
+        isfile(marker) || (touch(marker); println("not a port"); exit(1))
+        run(`\$(Base.julia_cmd()[1]) \$ARGS`)
+        """
+    exename = `$(Base.julia_cmd()[1]) --startup-file=no -e $launcher -- $marker`
+    testsuite = Dict("test" => :(@test true))
+
+    io = IOBuffer()
+    runtests(ParallelTestRunner, String[]; testsuite, exename, stdout=io, stderr=io)
+    str = String(take!(io))
+    @test isfile(marker)
+    @test contains(str, "SUCCESS")
+end
+
 @testset "custom worker with `init_worker_code`" begin
     init_worker_code = quote
         should_be_defined() = true

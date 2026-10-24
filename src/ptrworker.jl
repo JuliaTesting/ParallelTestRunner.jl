@@ -41,6 +41,22 @@ Malt.isrunning(wrkr::PTRWorker) = Malt.isrunning(wrkr.w)
 Malt.stop(wrkr::PTRWorker) = Malt.stop(wrkr.w)
 
 
+# Starting a worker can fail for reasons that have nothing to do with the tests, e.g., when
+# a heavily loaded system delays it past Malt's deadline for reporting its port. Such a
+# failure would abort the whole run, so try again before giving up.
+const WORKER_SPAWN_ATTEMPTS = 3
+
+function spawn_worker(; kwargs...)
+    for attempt in 1:WORKER_SPAWN_ATTEMPTS
+        try
+            return PTRWorker(; kwargs...)
+        catch err
+            (err isa InterruptException || attempt == WORKER_SPAWN_ATTEMPTS) && rethrow()
+        end
+    end
+end
+
+
 function test_exe(color::Bool=false)
     test_exeflags = Base.julia_cmd()
     push!(test_exeflags.exec, "--project=$(Base.active_project())")
@@ -98,7 +114,7 @@ function addworker(;
     push!(worker_env, "JULIA_NUM_THREADS" => "1")
     # Malt already sets OPENBLAS_NUM_THREADS to 1
     push!(worker_env, "OPENBLAS_NUM_THREADS" => "1")
-    wrkr = PTRWorker(; exename, exeflags, env = worker_env)
+    wrkr = spawn_worker(; exename, exeflags, env = worker_env)
     # make ParallelTestRunner available to `init_worker_code`; users commonly
     # need it to reference `AbstractTestRecord`, `execute`, etc. when defining
     # custom record types.
