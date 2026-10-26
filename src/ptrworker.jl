@@ -45,6 +45,10 @@ function test_exe(color::Bool=false)
     test_exeflags = Base.julia_cmd()
     push!(test_exeflags.exec, "--project=$(Base.active_project())")
     push!(test_exeflags.exec, "--color=$(color ? "yes" : "no")")
+    heap_size_hint = Base.JLOptions().heap_size_hint
+    if heap_size_hint != 0
+        push!(test_exeflags.exec, "--heap-size-hint=$(heap_size_hint)")
+    end
     return test_exeflags
 end
 
