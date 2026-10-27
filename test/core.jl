@@ -48,7 +48,7 @@ end
     @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
                                              memory_per_worker=1 * Int64(2) ^ 30) == 4
 
-    # max_num_jobs respected even when other parameters would select more
+    # max_default_jobs respected even when other parameters would select more
     @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
                                              memory_per_worker=1 * Int64(2) ^ 30,
                                              max_default_jobs=1) == 1
