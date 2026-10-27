@@ -47,6 +47,23 @@ end
     # lighter per-worker memory estimate increases the default
     @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
                                              memory_per_worker=1 * Int64(2) ^ 30) == 4
+
+    # max_num_jobs respected even when other parameters would select more
+    @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
+                                             memory_per_worker=1 * Int64(2) ^ 30,
+                                             max_default_jobs=1) == 1
+    @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
+                                             memory_per_worker=1 * Int64(2) ^ 30,
+                                             max_default_jobs=2) == 2
+
+    for badint in (0, -1)
+        @test_throws ArgumentError ParallelTestRunner.default_njobs(; memory_per_worker=badint)
+        @test_throws ArgumentError ParallelTestRunner.default_njobs(; max_default_jobs=badint)
+    end
+    for bad in (1.5, "2")
+        @test_throws TypeError ParallelTestRunner.default_njobs(; memory_per_worker=bad)
+        @test_throws TypeError ParallelTestRunner.default_njobs(; max_default_jobs=bad)
+    end
 end
 
 @testset "number of jobs" begin
@@ -98,15 +115,6 @@ end
                  max_default_jobs=1)
     end
     @test contains(String(take!(io)), "using 2 parallel jobs")
-
-    for badint in (0, -1, true)
-        @test_throws ArgumentError runtests(ParallelTestRunner, String[]; testsuite,
-                                            stdout=io, stderr=io, max_default_jobs=badint)
-    end
-    for bad in (1.5, "2")
-        @test_throws TypeError runtests(ParallelTestRunner, String[]; testsuite,
-                                            stdout=io, stderr=io, max_default_jobs=bad)
-    end
 end
 
 @testset "subdir use" begin
