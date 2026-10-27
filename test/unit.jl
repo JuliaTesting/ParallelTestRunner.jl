@@ -246,6 +246,10 @@ end
 
     exe = ParallelTestRunner.test_exe(true)
     @test any(contains("--color=yes"), exe.exec)
+
+    script = "using ParallelTestRunner; print(any(==(\"--heap-size-hint=1073741824\"), ParallelTestRunner.test_exe().exec))"
+    cmd = `$(Base.julia_cmd()) --project=$(Base.active_project()) --heap-size-hint=1G -e $script`
+    @test read(cmd, String) == "true"
 end
 
 @testset "truncate_line" begin
