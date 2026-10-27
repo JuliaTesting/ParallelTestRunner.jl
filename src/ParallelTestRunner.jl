@@ -114,7 +114,7 @@ Several keyword arguments are also supported:
   `PTR_NUM_JOBS` environment variable.
 - `max_default_jobs`: Upper bound on the default number of jobs, for resources that PTR
   does not account for itself, such as the memory of a GPU shared between workers
-  (default: `nothing`, no bound). Like `memory_per_worker`, it is ignored when the
+  (default: no bound). Like `memory_per_worker`, it is ignored when the
   number of jobs is set explicitly via `--jobs=N` or the `PTR_NUM_JOBS` environment variable.
 - `serial`: A vector of test names (keys of `testsuite`) that should be run one at a time
   instead of in parallel.

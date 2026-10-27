@@ -38,11 +38,11 @@ const DEFAULT_MEMORY_PER_WORKER = 2 * Int64(2)^30
 const DEFAULT_MAX_DEFAULT_JOBS = typemax(Int64)
 
 """
-    default_njobs(; memory_per_worker = 2 * 2^30)
+    default_njobs(; memory_per_worker = 2 * 2^30, [max_default_jobs])
 
 A function used to determine the default number of parallel jobs. Calculated as the
 number of CPU threads, clamped such that each worker can be assumed to use `memory_per_worker`
-bytes of the available system memory.
+bytes of the available system memory, and, if specified, further bounded by `max_default_jobs`.
 """
 function default_njobs(;
         memory_per_worker::Integer = DEFAULT_MEMORY_PER_WORKER,
