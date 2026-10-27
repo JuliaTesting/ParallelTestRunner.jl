@@ -57,5 +57,5 @@ function default_njobs(;
         throw(ArgumentError("`memory_per_worker` must be >= 1, got $(repr(memory_per_worker))"))
 
     memory_jobs = Int64(_free_memory) ÷ memory_per_worker
-    return max(1, min(_cpu_threads, memory_jobs, max_default_jobs))
+    return Int(max(1, min(_cpu_threads, memory_jobs, max_default_jobs)))
 end

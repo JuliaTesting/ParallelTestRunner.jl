@@ -56,6 +56,10 @@ end
                                              memory_per_worker=1 * Int64(2) ^ 30,
                                              max_default_jobs=2) == 2
 
+    # always returns an Int, regardless of the argument types
+    @test ParallelTestRunner.default_njobs(; memory_per_worker=1.5 * 2 ^ 30) isa Int
+
+    # invalid argument values
     @test_throws ArgumentError ParallelTestRunner.default_njobs(; memory_per_worker=0)
     @test_throws ArgumentError ParallelTestRunner.default_njobs(; memory_per_worker=-1)
     @test_throws TypeError ParallelTestRunner.default_njobs(; memory_per_worker="2")
