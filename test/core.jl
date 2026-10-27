@@ -121,6 +121,14 @@ end
                  max_default_jobs=1)
     end
     @test contains(String(take!(io)), "using 2 parallel jobs")
+
+    # Run with 1 job despite a system not having enough resources for 1 job
+    io = IOBuffer()
+    withenv("PTR_NUM_JOBS" => nothing) do
+        runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io,
+                 max_default_jobs=2÷4)
+    end
+    @test contains(String(take!(io)), "using 1 parallel jobs")
 end
 
 @testset "subdir use" begin
