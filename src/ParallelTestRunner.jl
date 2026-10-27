@@ -353,7 +353,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     # determine parallelism
     env_jobs = tryparse(Int, get(ENV, "PTR_NUM_JOBS", ""))
 
-    _jobs = _jobs = @something args.jobs env_jobs default_njobs(; memory_per_worker, max_default_jobs)
+    _jobs = @something args.jobs env_jobs default_njobs(; memory_per_worker, max_default_jobs)
     jobs = clamp(_jobs, 1, max(1, length(parallel_tests)))
     worker_pool = Channel{Union{Nothing, PTRWorker}}(jobs)
     for _ in 1:jobs
