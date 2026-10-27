@@ -42,7 +42,9 @@ const DEFAULT_MAX_DEFAULT_JOBS = typemax(Int64)
 
 A function used to determine the default number of parallel jobs. Calculated as the
 number of CPU threads, clamped such that each worker can be assumed to use `memory_per_worker`
-bytes of the available system memory, and, if specified, further bounded by `max_default_jobs`.
+bytes of the available system memory, bounded by `max_default_jobs` if specified.
+
+Always returns at least `1`.
 """
 function default_njobs(;
         memory_per_worker::Real = DEFAULT_MEMORY_PER_WORKER,
@@ -51,8 +53,10 @@ function default_njobs(;
         _cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
         _free_memory = available_memory(),
     )
-    max_default_jobs >= 1 ||
-        throw(ArgumentError("`max_default_jobs` must be a positive integer, got $(repr(max_default_jobs))"))
+    # Accept max_default_jobs = 0 since a common user pattern
+    #  is to limit the number of jobs with a flooring division
+    max_default_jobs >= 0 ||
+        throw(ArgumentError("`max_default_jobs` cannot be negative, got $(repr(max_default_jobs))"))
     memory_per_worker >= 1 ||
         throw(ArgumentError("`memory_per_worker` must be >= 1, got $(repr(memory_per_worker))"))
 
