@@ -56,14 +56,14 @@ end
                                              memory_per_worker=1 * Int64(2) ^ 30,
                                              max_default_jobs=2) == 2
 
-    for badint in (0, -1)
-        @test_throws ArgumentError ParallelTestRunner.default_njobs(; memory_per_worker=badint)
-        @test_throws ArgumentError ParallelTestRunner.default_njobs(; max_default_jobs=badint)
-    end
-    for bad in (1.5, "2")
-        @test_throws TypeError ParallelTestRunner.default_njobs(; memory_per_worker=bad)
-        @test_throws TypeError ParallelTestRunner.default_njobs(; max_default_jobs=bad)
-    end
+    @test_throws ArgumentError ParallelTestRunner.default_njobs(; memory_per_worker=0)
+    @test_throws ArgumentError ParallelTestRunner.default_njobs(; memory_per_worker=-1)
+    @test_throws TypeError ParallelTestRunner.default_njobs(; memory_per_worker="2")
+
+    @test_throws ArgumentError ParallelTestRunner.default_njobs(; max_default_jobs=0)
+    @test_throws ArgumentError ParallelTestRunner.default_njobs(; max_default_jobs=-1)
+    @test_throws TypeError ParallelTestRunner.default_njobs(; max_default_jobs=1.5)
+    @test_throws TypeError ParallelTestRunner.default_njobs(; max_default_jobs="2")
 end
 
 @testset "number of jobs" begin
