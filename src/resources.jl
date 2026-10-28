@@ -35,7 +35,7 @@ end
 # memory). Packages whose tests are heavier can pass a larger
 # `memory_per_worker` to `runtests`.
 const DEFAULT_MEMORY_PER_WORKER = 2 * Int64(2)^30
-const DEFAULT_MAX_DEFAULT_JOBS = typemax(Int64)
+const DEFAULT_MAX_DEFAULT_JOBS = typemax(Int)
 
 """
     default_njobs(; memory_per_worker = 2 * 2^30, [max_default_jobs])
