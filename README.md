@@ -12,7 +12,7 @@ The main entry point of `ParallelTestRunner` is the exported function `runtests`
 * the module for which you want to run the tests
 * the list of arguments passed to the test script, as a `Vector{String}`, this will typically be [`Base.ARGS`](https://docs.julialang.org/en/v1/base/constants/#Base.ARGS).
 
-With the `--help` flag you can print a help message:
+With the `--help` (or `-h`) flag you can print a help message:
 
 ```julia
 julia> using ParallelTestRunner
@@ -20,15 +20,16 @@ julia> using ParallelTestRunner
 julia> ParallelTestRunner.runtests(ParallelTestRunner, ["--help"])
 Usage: runtests.jl [--help] [--list] [--jobs=N] [TESTS...]
 
-   --help             Show this text.
-   --list             List available tests alphabetically.
-   --verbose          Print more information during testing.
-   --quickfail        Fail the entire run as soon as a single test errored.
-   --jobs=N           Launch `N` processes to perform tests. Can also be set
+   -h, --help         Show this text.
+   -l, --list         List available tests alphabetically.
+   -V, --verbose      Print more information during testing.
+   -q, --quickfail    Fail the entire run as soon as a single test errored.
+   -j N, --jobs=N     Launch `N` processes to perform tests. Can also be set
                       with the PTR_NUM_JOBS environment
                       variable, with `--jobs=N` taking precedence.
 
-   Remaining arguments filter the tests that will be executed.
+Remaining arguments filter the tests that will be executed.
+Prefix your argument with '!' to instead exclude those tests
 ```
 
 ## Setup

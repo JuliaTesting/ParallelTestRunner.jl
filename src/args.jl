@@ -70,34 +70,49 @@ struct ParsedArgs
 end
 
 # parse some command-line arguments
-function extract_flag!(args, flag; typ = Nothing)
-    for f in args
-        # only accept the exact flag or `--flag=value`, so that flags sharing a
-        # prefix (e.g. `--list` and `--listing`) don't capture each other
-        if f == flag || startswith(f, flag * "=")
-            # Check if it's just `--flag` or if it's `--flag=foo`
-            val = if f == flag
-                typ === Nothing ||
-                    error("Option `$flag` requires a value (use `$flag=<value>`)")
-                nothing
-            else
-                _, value = split(f, '='; limit = 2)
-                if typ === Nothing || typ <: AbstractString
-                    value
-                else
-                    parsed = tryparse(typ, value)
-                    parsed === nothing &&
-                        error("Invalid value `$value` for option `$flag` (expected a value of type $typ)")
-                    parsed
-                end
-            end
+#
+# `flag` is the long form (`--flag` or `--flag=value`). If `short` is given, the short
+# form is also accepted: `-f` for boolean flags, and `-f value` or `-fvalue` for flags
+# that take a value. If the flag is passed multiple times, the first occurrence wins.
+function extract_flag!(args, flag; short = nothing, typ = Nothing)
+    # only accept the exact flag or `--flag=value`, so that flags sharing a
+    # prefix (e.g. `--list` and `--listing`) don't capture each other
+    is_long(f) = f == flag || startswith(f, flag * "=")
+    is_short(f) = short !== nothing && (f == short || (typ !== Nothing && startswith(f, short)))
 
-            # Drop this value from our args
-            filter!(x -> x != f, args)
-            return Some(val)
+    i = findfirst(f -> is_long(f) || is_short(f), args)
+    i === nothing && return nothing
+    f = popat!(args, i)
+
+    val = if f == flag || f == short
+        # just `--flag` or `-f`, which for typed flags means `-f value`
+        if typ === Nothing
+            nothing
+        elseif f == short && i <= length(args)
+            popat!(args, i)
+        else
+            hint = short === nothing ? "`$flag=<value>`" : "`$flag=<value>` or `$short <value>`"
+            error("Option `$f` requires a value (use $hint)")
         end
+    elseif is_long(f)
+        # `--flag=foo`
+        last(split(f, '='; limit = 2))
+    else
+        # `-ffoo`
+        f[(length(short) + 1):end]
     end
-    return nothing
+
+    if !(val === nothing || typ === Nothing || typ <: AbstractString)
+        parsed = tryparse(typ, val)
+        parsed === nothing &&
+            error("Invalid value `$val` for option `$(is_long(f) ? flag : short)` (expected a value of type $typ)")
+        val = parsed
+    end
+
+    # drop any further occurrences of this flag
+    extract_flag!(args, flag; short, typ)
+
+    return Some(val)
 end
 
 """
@@ -115,17 +130,17 @@ of these flags will be recorded in the `custom` field of the returned [`ParsedAr
 function parse_args(args; custom::Array{String} = String[])
     args = copy(args)
 
-    help = extract_flag!(args, "--help")
+    help = extract_flag!(args, "--help"; short = "-h")
     if help !== nothing
         usage =
             """
             Usage: runtests.jl [--help] [--list] [--jobs=N] [TESTS...]
 
-               --help             Show this text.
-               --list             List available tests alphabetically.
-               --verbose          Print more information during testing.
-               --quickfail        Fail the entire run as soon as a single test errored.
-               --jobs=N           Launch `N` processes to perform tests. Can also be set
+               -h, --help         Show this text.
+               -l, --list         List available tests alphabetically.
+               -V, --verbose      Print more information during testing.
+               -q, --quickfail    Fail the entire run as soon as a single test errored.
+               -j N, --jobs=N     Launch `N` processes to perform tests. Can also be set
                                   with the PTR_NUM_JOBS environment
                                   variable, with `--jobs=N` taking precedence."""
 
@@ -141,10 +156,10 @@ function parse_args(args; custom::Array{String} = String[])
         exit(0)
     end
 
-    jobs = extract_flag!(args, "--jobs"; typ = Int)
-    verbose = extract_flag!(args, "--verbose")
-    quickfail = extract_flag!(args, "--quickfail")
-    list = extract_flag!(args, "--list")
+    jobs = extract_flag!(args, "--jobs"; short = "-j", typ = Int)
+    verbose = extract_flag!(args, "--verbose"; short = "-V")
+    quickfail = extract_flag!(args, "--quickfail"; short = "-q")
+    list = extract_flag!(args, "--list"; short = "-l")
 
     # boolean flags don't take values
     for (flag, val) in (("--verbose", verbose), ("--quickfail", quickfail), ("--list", list))

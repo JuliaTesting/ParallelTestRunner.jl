@@ -38,6 +38,41 @@
     # a typed flag with an unparseable value is an error
     args = ["--jobs=abc"]
     @test_throws ErrorException ParallelTestRunner.extract_flag!(args, "--jobs"; typ=Int)
+
+    # short forms
+    args = ["-V", "test1"]
+    result = ParallelTestRunner.extract_flag!(args, "--verbose"; short="-V")
+    @test result === Some(nothing)
+    @test args == ["test1"]
+
+    args = ["-j", "4", "test1"]
+    result = ParallelTestRunner.extract_flag!(args, "--jobs"; short="-j", typ=Int)
+    @test something(result) == 4
+    @test args == ["test1"]
+
+    args = ["-j4", "test1"]
+    result = ParallelTestRunner.extract_flag!(args, "--jobs"; short="-j", typ=Int)
+    @test something(result) == 4
+    @test args == ["test1"]
+
+    # boolean short flags only match exactly
+    args = ["-Vx"]
+    result = ParallelTestRunner.extract_flag!(args, "--verbose"; short="-V")
+    @test result === nothing
+    @test args == ["-Vx"]
+
+    # repeated flags, in either form, are all consumed
+    args = ["--verbose", "-V", "--verbose"]
+    result = ParallelTestRunner.extract_flag!(args, "--verbose"; short="-V")
+    @test result === Some(nothing)
+    @test isempty(args)
+
+    # a typed short flag without a value is an error
+    args = ["-j"]
+    @test_throws ErrorException ParallelTestRunner.extract_flag!(args, "--jobs"; short="-j", typ=Int)
+
+    args = ["-j", "abc"]
+    @test_throws ErrorException ParallelTestRunner.extract_flag!(args, "--jobs"; short="-j", typ=Int)
 end
 
 @testset "parse_args" begin
@@ -66,6 +101,25 @@ end
         @test args.verbose !== nothing
         @test args.quickfail !== nothing
         @test something(args.jobs) == 2
+    end
+
+    @testset "short flags" begin
+        args = parse_args(["-V", "-q", "-l", "-j", "2", "basic"])
+        @test args.verbose !== nothing
+        @test args.quickfail !== nothing
+        @test args.list !== nothing
+        @test something(args.jobs) == 2
+        @test args.positionals == ["basic"]
+
+        args = parse_args(["-j3"])
+        @test something(args.jobs) == 3
+
+        # mixing long and short forms of the same flag is fine
+        args = parse_args(["--verbose", "-V"])
+        @test args.verbose !== nothing
+
+        @test_throws ErrorException parse_args(["-x"])
+        @test_throws ErrorException parse_args(["-j"])
     end
 
     @testset "positional arguments" begin
