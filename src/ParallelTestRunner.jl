@@ -17,7 +17,7 @@ if VERSION >= v"1.13.0-DEV.1044"
     using Base.ScopedValues
 end
 
-# anyonpass, Lockable, with_testset, available_memory
+# anyonpass, Lockable, with_testset, available_memory, create_testset
 include("compatutils.jl")
 
 # PTRWorker, worker_id, test_exe, addworkers, addworker
@@ -319,34 +319,6 @@ const SLOW_INIT_FACTOR = 2
 # ... but only if it also exceeds this many seconds, to avoid false positives in test suites
 # with a short cold worker init
 const SLOW_INIT_MIN_TIME = 10.0
-
-# create a testset to record test results in, with the given timings if supported
-function create_testset(name; start=nothing, stop=nothing, kwargs...)
-    if start === nothing
-        testset = Test.DefaultTestSet(name; kwargs...)
-    elseif VERSION >= v"1.13.0-DEV.1297"
-        testset = Test.DefaultTestSet(name; time_start=start, kwargs...)
-    elseif VERSION < v"1.13.0-DEV.1037"
-        testset = Test.DefaultTestSet(name; kwargs...)
-        testset.time_start = start
-    else
-        # no way to set time_start retroactively
-        testset = Test.DefaultTestSet(name; kwargs...)
-    end
-
-    if stop !== nothing
-        if VERSION < v"1.13.0-DEV.1037"
-            testset.time_end = stop
-        elseif VERSION >= v"1.13.0-DEV.1297"
-            @atomic testset.time_end = stop
-        else
-            # if we can't set the start time, also don't set a stop one
-            # to avoid negative timings
-        end
-    end
-
-    return testset
-end
 
 # Helper function, to be used for testing, with `tests` already sorted.
 function _runtests(mod::Module, args::ParsedArgs;
