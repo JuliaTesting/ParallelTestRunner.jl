@@ -93,3 +93,32 @@ end
 else
     available_memory() = Sys.free_memory()
 end
+
+
+# create a testset to record test results in, with the given timings if supported
+function create_testset(name; start=nothing, stop=nothing, kwargs...)
+    if start === nothing
+        testset = Test.DefaultTestSet(name; kwargs...)
+    elseif VERSION >= v"1.13.0-DEV.1297"
+        testset = Test.DefaultTestSet(name; time_start=start, kwargs...)
+    elseif VERSION < v"1.13.0-DEV.1037"
+        testset = Test.DefaultTestSet(name; kwargs...)
+        testset.time_start = start
+    else
+        # no way to set time_start retroactively
+        testset = Test.DefaultTestSet(name; kwargs...)
+    end
+
+    if stop !== nothing
+        if VERSION < v"1.13.0-DEV.1037"
+            testset.time_end = stop
+        elseif VERSION >= v"1.13.0-DEV.1297"
+            @atomic testset.time_end = stop
+        else
+            # if we can't set the start time, also don't set a stop one
+            # to avoid negative timings
+        end
+    end
+
+    return testset
+end

@@ -11,6 +11,13 @@ filter!(testsuite) do (name, _)
     name != "utils" && !startswith(name, "sample_tests/")
 end
 
+# captured variables that get boxed (`Core.Box`) lose their type
+if isdefined(Test, :detect_closure_boxes)
+    testsuite["closure boxes"] = quote
+        @test Test.detect_closure_boxes(ParallelTestRunner) == []
+    end
+end
+
 init_code = quote
     using ParallelTestRunner
     using Test

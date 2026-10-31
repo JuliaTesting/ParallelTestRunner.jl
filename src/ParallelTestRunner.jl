@@ -17,7 +17,7 @@ if VERSION >= v"1.13.0-DEV.1044"
     using Base.ScopedValues
 end
 
-# anyonpass, Lockable, with_testset, available_memory
+# anyonpass, Lockable, with_testset, available_memory, create_testset
 include("compatutils.jl")
 
 # PTRWorker, worker_id, test_exe, addworkers, addworker
@@ -248,9 +248,10 @@ function runtests(mod::Module, args::ParsedArgs;
     # set-up
     #
 
+    historical_durations, historical_failures = load_test_history(mod, history_key)
+
     # list tests, if requested
     if args.list !== nothing
-        historical_durations, historical_failures = load_test_history(mod, history_key)
         sorted_tests = sort(collect(keys(testsuite)))
         name_align = isempty(sorted_tests) ? 0 : maximum(textwidth, sorted_tests)
         duration_strs = Dict(
@@ -282,7 +283,6 @@ function runtests(mod::Module, args::ParsedArgs;
     # determine test order
     tests = collect(keys(testsuite))
     Random.shuffle!(tests)
-    historical_durations, historical_failures = load_test_history(mod, history_key)
     get_historical_duration(test) = TestHistoryEntry(get(historical_durations, test, Inf), test in historical_failures)
     sort!(tests, by = x -> get_historical_duration(x), rev = true)
 
@@ -904,33 +904,6 @@ function _runtests(mod::Module, args::ParsedArgs;
         end
     end
 
-    # process test results and convert into a testset
-    function create_testset(name; start=nothing, stop=nothing, kwargs...)
-        if start === nothing
-            testset = Test.DefaultTestSet(name; kwargs...)
-        elseif VERSION >= v"1.13.0-DEV.1297"
-            testset = Test.DefaultTestSet(name; time_start=start, kwargs...)
-        elseif VERSION < v"1.13.0-DEV.1037"
-            testset = Test.DefaultTestSet(name; kwargs...)
-            testset.time_start = start
-        else
-            # no way to set time_start retroactively
-            testset = Test.DefaultTestSet(name; kwargs...)
-        end
-
-        if stop !== nothing
-            if VERSION < v"1.13.0-DEV.1037"
-                testset.time_end = stop
-            elseif VERSION >= v"1.13.0-DEV.1297"
-                @atomic testset.time_end = stop
-            else
-                # if we can't set the start time, also don't set a stop one
-                # to avoid negative timings
-            end
-        end
-
-        return testset
-    end
     t1 = time()
     o_ts = create_testset("Overall"; start=t0, stop=t1, verbose=!isnothing(args.verbose))
     function collect_results()
