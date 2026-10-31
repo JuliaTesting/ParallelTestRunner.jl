@@ -47,6 +47,29 @@ end
     # lighter per-worker memory estimate increases the default
     @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
                                              memory_per_worker=1 * Int64(2) ^ 30) == 4
+
+    # max_default_jobs respected even when other parameters would select more
+    @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
+                                             memory_per_worker=1 * Int64(2) ^ 30,
+                                             max_default_jobs=1) == 1
+    @test ParallelTestRunner.default_njobs(; _cpu_threads=4, _free_memory=UInt64(2) ^ 32,
+                                             memory_per_worker=1 * Int64(2) ^ 30,
+                                             max_default_jobs=2) == 2
+
+    # max_default_jobs = 0 returns 1
+    @test ParallelTestRunner.default_njobs(; max_default_jobs=0) == 1
+
+    # always returns an Int, regardless of the argument types
+    @test ParallelTestRunner.default_njobs(; memory_per_worker=1.5 * 2 ^ 30) isa Int
+
+    # invalid argument values
+    @test_throws ArgumentError ParallelTestRunner.default_njobs(; memory_per_worker=0)
+    @test_throws ArgumentError ParallelTestRunner.default_njobs(; memory_per_worker=-1)
+    @test_throws TypeError ParallelTestRunner.default_njobs(; memory_per_worker="2")
+
+    @test_throws ArgumentError ParallelTestRunner.default_njobs(; max_default_jobs=-1)
+    @test_throws TypeError ParallelTestRunner.default_njobs(; max_default_jobs=1.5)
+    @test_throws TypeError ParallelTestRunner.default_njobs(; max_default_jobs="2")
 end
 
 @testset "number of jobs" begin
@@ -67,6 +90,43 @@ end
     io = IOBuffer()
     withenv("PTR_NUM_JOBS" => "2") do
         runtests(ParallelTestRunner, ["--jobs=1"]; testsuite, stdout=io, stderr=io)
+    end
+    @test contains(String(take!(io)), "using 1 parallel jobs")
+
+    # max_default_jobs bounds the default, but not explicit settings
+    if ParallelTestRunner.default_njobs() >= 2
+        io = IOBuffer()
+        withenv("PTR_NUM_JOBS" => nothing) do
+            runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io)
+        end
+        @test !contains(String(take!(io)), "using 1 parallel jobs")
+    end
+    io = IOBuffer()
+    withenv("PTR_NUM_JOBS" => nothing) do
+        runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io,
+                 max_default_jobs=1)
+    end
+    @test contains(String(take!(io)), "using 1 parallel jobs")
+
+    io = IOBuffer()
+    withenv("PTR_NUM_JOBS" => nothing) do
+        runtests(ParallelTestRunner, ["--jobs=2"]; testsuite, stdout=io, stderr=io,
+                 max_default_jobs=1)
+    end
+    @test contains(String(take!(io)), "using 2 parallel jobs")
+
+    io = IOBuffer()
+    withenv("PTR_NUM_JOBS" => "2") do
+        runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io,
+                 max_default_jobs=1)
+    end
+    @test contains(String(take!(io)), "using 2 parallel jobs")
+
+    # Run with 1 job despite a system not having enough resources for 1 job
+    io = IOBuffer()
+    withenv("PTR_NUM_JOBS" => nothing) do
+        runtests(ParallelTestRunner, String[]; testsuite, stdout=io, stderr=io,
+                 max_default_jobs=2÷4)
     end
     @test contains(String(take!(io)), "using 1 parallel jobs")
 end

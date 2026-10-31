@@ -35,20 +35,31 @@ end
 # memory). Packages whose tests are heavier can pass a larger
 # `memory_per_worker` to `runtests`.
 const DEFAULT_MEMORY_PER_WORKER = 2 * Int64(2)^30
+const DEFAULT_MAX_DEFAULT_JOBS = typemax(Int)
 
 """
-    default_njobs(; memory_per_worker = 2 * 2^30)
+    default_njobs(; memory_per_worker = 2 * 2^30, [max_default_jobs])
 
 A function used to determine the default number of parallel jobs. Calculated as the
 number of CPU threads, clamped such that each worker can be assumed to use `memory_per_worker`
-bytes of the available system memory.
+bytes of the available system memory, bounded by `max_default_jobs` if specified.
+
+Always returns at least `1`.
 """
 function default_njobs(;
-        memory_per_worker = DEFAULT_MEMORY_PER_WORKER,
+        memory_per_worker::Real = DEFAULT_MEMORY_PER_WORKER,
+        max_default_jobs::Integer = DEFAULT_MAX_DEFAULT_JOBS,
         # Just use Sys.EFFECTIVE_CPU_THREADS when min VERSION >= v"1.13"
         _cpu_threads = (@static isdefined(Sys, :EFFECTIVE_CPU_THREADS) ? Sys.EFFECTIVE_CPU_THREADS : Sys.CPU_THREADS),
         _free_memory = available_memory(),
     )
+    # Accept max_default_jobs = 0 since a common user pattern
+    #  is to limit the number of jobs with a flooring division
+    max_default_jobs >= 0 ||
+        throw(ArgumentError("`max_default_jobs` cannot be negative, got $(repr(max_default_jobs))"))
+    memory_per_worker >= 1 ||
+        throw(ArgumentError("`memory_per_worker` must be >= 1, got $(repr(memory_per_worker))"))
+
     memory_jobs = Int64(_free_memory) ÷ memory_per_worker
-    return max(1, min(_cpu_threads, memory_jobs))
+    return Int(max(1, min(_cpu_threads, memory_jobs, max_default_jobs)))
 end
