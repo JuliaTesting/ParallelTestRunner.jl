@@ -170,26 +170,33 @@ end
 # terminal progress bar
 #
 
-# The protocol through which the terminal described by `env` takes progress reports, which it
-# typically renders as a progress bar in its tab or in the taskbar, or `nothing` if it is not
-# known to take any:
-# - `:osc94`, the ConEmu sequence that most terminals with a progress bar understand.
-# Terminals are recognized by name instead of sending the sequence everywhere, because some
-# of those that do not know OSC 9;4 show a notification for every OSC 9 they receive.
-# `PTR_TERM_PROGRESS` forces the protocol instead, or `none`.
-function progress_bar_protocol(env = ENV)
+# The protocols through which the terminal described by `env` is told about the progress of
+# the run, which it typically renders in its tab or in the taskbar:
+# - `:osc7501`, the program status protocol, which goes to every terminal: those that do not
+#   know it ignore it, as nothing else uses that number;
+# - `:osc94`, the ConEmu sequence that most terminals with a progress bar understand. Some
+#   of those that do not know it show a notification for every OSC 9 they receive, so it is
+#   only sent to the terminals recognized as taking it.
+# `PTR_TERM_PROGRESS` forces a single protocol instead, or `none` of them.
+function progress_bar_protocols(env = ENV)
     forced = lowercase(strip(get(env, "PTR_TERM_PROGRESS", "")))
-    forced == "none" && return nothing
-    forced == "osc94" && return :osc94
+    forced == "none" && return Symbol[]
+    forced in ("osc94", "osc7501") && return [Symbol(forced)]
     if !isempty(forced)
-        @warn "Ignoring the `PTR_TERM_PROGRESS` environment variable, which should be `osc94` or `none`" value=forced
+        @warn "Ignoring the `PTR_TERM_PROGRESS` environment variable, which should be `osc94`, `osc7501` or `none`" value=forced
     end
+
+    # a terminal that says it understands no sequence would show them
+    get(env, "TERM", "") == "dumb" && return Symbol[]
 
     # which terminals take OSC 9;4 was taken from the `anstyle-progress` crate
     # (https://github.com/rust-cli/anstyle)
     version(name) = something(tryparse(Int, first(eachsplit(get(env, name, ""), '.'))), 0)
     term = get(env, "TERM_PROGRAM", "")
-    return if haskey(env, "WT_SESSION") ||            # Windows Terminal
+    return if term == "rex"
+        # it ignores OSC 9;4, and one that would not could mistake it for a status of its own
+        [:osc7501]
+    elseif haskey(env, "WT_SESSION") ||            # Windows Terminal
            get(env, "ConEmuANSI", "") == "ON" ||
            term in ("ghostty", "WezTerm", "herdr") ||
            # unlike `TERM_PROGRAM`, this identifies Ghostty across SSH
@@ -200,19 +207,40 @@ function progress_bar_protocol(env = ENV)
            occursin(r"P(?![a-z])", get(env, "TERM_FEATURES", "")) ||
            version("PTYXIS_VERSION") >= 48 ||
            version("KONSOLE_VERSION") >= 260400       # 26.04
-        :osc94
+        [:osc7501, :osc94]
     else
-        nothing
+        [:osc7501]
     end
 end
 
-# The sequence reporting `state` to the terminal. During the run that is `:working`, or
-# `:failing` once a test did not pass, with `completed` out of `total` tests done. At the end
-# it is `:clear`, which removes the progress bar.
-function progress_bar_sequence(state::Symbol, completed::Integer = 0, total::Integer = 0)
+# The sequence reporting `state` to a terminal that speaks `protocol`. During the run that is
+# `:working`, or `:failing` once a test did not pass, with `completed` out of `total` tests
+# done, which `msg` describes. At the end it is `:done`, `:error`, or `:clear` when
+# there is no outcome to report.
+function progress_bar_sequence(protocol::Symbol, state::Symbol, completed::Integer = 0, total::Integer = 0,
+                               msg::AbstractString = "")
     percent = total > 0 ? clamp(100 * completed ÷ total, 0, 100) : 0
-    report = state === :working ? "1;$percent" : state === :failing ? "2;$percent" : "0"
-    return "\033]9;4;$report\a"
+    if protocol === :osc7501
+        # an error is final in this protocol, so failures only show once the run is over,
+        # where the outcome is left behind for the user to find
+        report = if state in (:working, :failing)
+            # free text is encoded, as it could not contain the separators otherwise
+            "state=working:progress=$percent:msg=$(Base64.base64encode(msg))"
+        else
+            "state=$state"
+        end
+        # the reports go to a record of our own: without an identifier they would replace
+        # the status of the terminal as a whole, which is that of the Julia REPL when the
+        # tests are run from there, and clearing it would remove the records of every program
+        report *= ":id=ParallelTestRunner"
+        # every report replaces its record entirely, so each has to name the program
+        state === :clear || (report *= ":app=julia")
+        return "\033]7501;$report\033\\"
+    else
+        # there is nowhere to leave an outcome, so the progress bar is removed at the end
+        report = state === :working ? "1;$percent" : state === :failing ? "2;$percent" : "0"
+        return "\033]9;4;$report\a"
+    end
 end
 
 # Truncate `line` to at most `max_width` characters, appending "..." when truncated.

@@ -9,6 +9,7 @@ using Base.Filesystem: path_separator
 using Statistics
 import Test
 import Random
+import Base64
 import IOCapture
 using Test: DefaultTestSet
 using StyledStrings: Face, @styled_str, addface!
@@ -421,7 +422,7 @@ function _runtests(mod::Module, args::ParsedArgs;
 
     io_ctx = test_IOContext(RecordType, stdout, stderr, print_lock, name_align, !isnothing(args.verbose), max_worker_rss)
     # progress bar drawn by the terminal itself, e.g. in its tab or in the taskbar
-    progress_protocol = io_ctx.stdout isa Base.TTY ? progress_bar_protocol() : nothing
+    progress_protocols = io_ctx.stdout isa Base.TTY ? progress_bar_protocols() : Symbol[]
     print_header(RecordType, io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
@@ -462,7 +463,7 @@ function _runtests(mod::Module, args::ParsedArgs;
         line2 = truncate_line(line2, max_width)
 
         # line 3: progress + ETA
-        line3 = "Progress: $completed/$total tests completed"
+        progress = "$completed/$total tests completed"
         if completed > 0
             # estimate per-test time (slightly pessimistic)
             durations_done = [end_time - start_time for (_, _,_, start_time, end_time) in results_snapshot]
@@ -493,8 +494,9 @@ function _runtests(mod::Module, args::ParsedArgs;
 
             eta_sec = max(serial_remaining + parallel_remaining / jobs, longest_remaining)
             eta_mins = round(Int, eta_sec / 60)
-            line3 *= " │ ETA: ~$eta_mins min"
+            progress *= " │ ETA: ~$eta_mins min"
         end
+        line3 = "Progress: " * progress
 
         # only display the status bar on actual terminals
         # (but make sure we cover this code in CI)
@@ -503,9 +505,9 @@ function _runtests(mod::Module, args::ParsedArgs;
             println(io_ctx.stdout, line1)
             println(io_ctx.stdout, line2)
             print(io_ctx.stdout, line3)
-            if progress_protocol !== nothing
-                state = any(nonpass, results_snapshot) ? :failing : :working
-                print(io_ctx.stdout, progress_bar_sequence(state, completed, total))
+            state = any(nonpass, results_snapshot) ? :failing : :working
+            for protocol in progress_protocols
+                print(io_ctx.stdout, progress_bar_sequence(protocol, state, completed, total, progress))
             end
             flush(io_ctx.stdout)
             status_lines_visible[] = 3
@@ -616,12 +618,17 @@ function _runtests(mod::Module, args::ParsedArgs;
         finally
             n_running = @lock running_tests length(running_tests[])
             n_results = @lock results length(results[])
-            if progress_protocol !== nothing
-                # there is nowhere to leave an outcome, so the progress bar is removed
-                print(io_ctx.stdout, progress_bar_sequence(:clear))
+            finished = n_running == 0 && n_results >= length(tests)
+            if !isempty(progress_protocols)
+                # an interrupted run has no outcome, unless a test already failed
+                failed = @lock results any(nonpass, results[])
+                outcome = failed ? :error : finished ? :done : :clear
+                for protocol in progress_protocols
+                    print(io_ctx.stdout, progress_bar_sequence(protocol, outcome))
+                end
                 flush(io_ctx.stdout)
             end
-            if n_running == 0 && n_results >= length(tests)
+            if finished
                 # XXX: only erase the status if we completed successfully.
                 #      in other cases we'll have printed "caught interrupt"
                 clear_status()
