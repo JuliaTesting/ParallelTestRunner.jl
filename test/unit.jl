@@ -272,6 +272,66 @@ end
     @test endswith(truncated, "...")
 end
 
+@testset "progress_bar_protocol" begin
+    protocol(env...) = ParallelTestRunner.progress_bar_protocol(Dict{String, String}(env...))
+
+    @test protocol() === nothing
+    @test protocol("TERM_PROGRAM" => "Apple_Terminal") === nothing
+    @test protocol("TERM_PROGRAM" => "ghostty") === :osc94
+    @test protocol("TERM_PROGRAM" => "WezTerm") === :osc94
+    @test protocol("TERM_PROGRAM" => "herdr") === :osc94
+    @test protocol("WT_SESSION" => "0c1f5e7a") === :osc94
+    @test protocol("ConEmuANSI" => "ON") === :osc94
+    @test protocol("ConEmuANSI" => "OFF") === nothing
+
+    # across SSH, Ghostty is only identified by `TERM`
+    @test protocol("TERM" => "xterm-ghostty") === :osc94
+    @test protocol("TERM" => "xterm-256color") === nothing
+
+    # iTerm2 is only supported if it reports the progress feature, as older versions
+    # mistake progress for a notification
+    @test protocol("TERM_PROGRAM" => "iTerm.app", "TERM_FEATURES" => "MBT2ScP") === :osc94
+    @test protocol("TERM_PROGRAM" => "iTerm.app", "TERM_FEATURES" => "MBT2Sc") === nothing
+    @test protocol("TERM_PROGRAM" => "iTerm.app") === nothing
+    # the feature is a code of its own, wherever it is, and not the start of another one
+    @test protocol("TERM_FEATURES" => "PT2Sc") === :osc94
+    @test protocol("TERM_FEATURES" => "MPcT2") === nothing
+
+    # Ptyxis and Konsole are supported from a given version on
+    @test protocol("PTYXIS_VERSION" => "48.0") === :osc94
+    @test protocol("PTYXIS_VERSION" => "49.2") === :osc94
+    @test protocol("PTYXIS_VERSION" => "47.10") === nothing
+    @test protocol("PTYXIS_VERSION" => "") === nothing
+    @test protocol("PTYXIS_VERSION" => "dev") === nothing
+    @test protocol("KONSOLE_VERSION" => "260400") === :osc94
+    @test protocol("KONSOLE_VERSION" => "251203") === nothing
+
+    # the environment variable forces the protocol, whatever the terminal
+    @test protocol("PTR_TERM_PROGRESS" => "osc94") === :osc94
+    @test protocol("PTR_TERM_PROGRESS" => "OSC94", "TERM_PROGRAM" => "Apple_Terminal") === :osc94
+    @test protocol("PTR_TERM_PROGRESS" => "none", "TERM_PROGRAM" => "ghostty") === nothing
+    @test protocol("PTR_TERM_PROGRESS" => "", "TERM_PROGRAM" => "ghostty") === :osc94
+
+    # and is ignored with a warning when it does not name one
+    @test (@test_logs (:warn, r"PTR_TERM_PROGRESS") protocol("PTR_TERM_PROGRESS" => "true")) === nothing
+    @test (@test_logs (:warn, r"PTR_TERM_PROGRESS") protocol("PTR_TERM_PROGRESS" => "osc9", "TERM_PROGRAM" => "ghostty")) === :osc94
+    @test_logs protocol("PTR_TERM_PROGRESS" => "none")
+    @test_logs protocol("TERM_PROGRAM" => "ghostty")
+end
+
+@testset "progress_bar_sequence" begin
+    sequence = ParallelTestRunner.progress_bar_sequence
+
+    @test sequence(:working, 0, 8) == "\e]9;4;1;0\a"
+    @test sequence(:working, 1, 3) == "\e]9;4;1;33\a"
+    @test sequence(:working, 8, 8) == "\e]9;4;1;100\a"
+    @test sequence(:working, 0, 0) == "\e]9;4;1;0\a"
+    # failures turn the progress bar into an error
+    @test sequence(:failing, 4, 8) == "\e]9;4;2;50\a"
+    # and it is removed at the end
+    @test sequence(:clear) == "\e]9;4;0\a"
+end
+
 @testset "TestHistoryEntry" begin
     flow = ParallelTestRunner.TestHistoryEntry(1,true)
     fhigh = ParallelTestRunner.TestHistoryEntry(10,true)

@@ -166,6 +166,55 @@ function print_test_crashed(::Type{<:AbstractTestRecord}, wrkr, test, ctx::TestI
     end
 end
 
+#
+# terminal progress bar
+#
+
+# The protocol through which the terminal described by `env` takes progress reports, which it
+# typically renders as a progress bar in its tab or in the taskbar, or `nothing` if it is not
+# known to take any:
+# - `:osc94`, the ConEmu sequence that most terminals with a progress bar understand.
+# Terminals are recognized by name instead of sending the sequence everywhere, because some
+# of those that do not know OSC 9;4 show a notification for every OSC 9 they receive.
+# `PTR_TERM_PROGRESS` forces the protocol instead, or `none`.
+function progress_bar_protocol(env = ENV)
+    forced = lowercase(strip(get(env, "PTR_TERM_PROGRESS", "")))
+    forced == "none" && return nothing
+    forced == "osc94" && return :osc94
+    if !isempty(forced)
+        @warn "Ignoring the `PTR_TERM_PROGRESS` environment variable, which should be `osc94` or `none`" value=forced
+    end
+
+    # which terminals take OSC 9;4 was taken from the `anstyle-progress` crate
+    # (https://github.com/rust-cli/anstyle)
+    version(name) = something(tryparse(Int, first(eachsplit(get(env, name, ""), '.'))), 0)
+    term = get(env, "TERM_PROGRAM", "")
+    return if haskey(env, "WT_SESSION") ||            # Windows Terminal
+           get(env, "ConEmuANSI", "") == "ON" ||
+           term in ("ghostty", "WezTerm", "herdr") ||
+           # unlike `TERM_PROGRAM`, this identifies Ghostty across SSH
+           get(env, "TERM", "") == "xterm-ghostty" ||
+           # the features that iTerm2 reports are codes made of an uppercase letter and any
+           # lowercase ones, where `P` stands for progress; older versions of it, which are
+           # among those that show notifications, do not report this one
+           occursin(r"P(?![a-z])", get(env, "TERM_FEATURES", "")) ||
+           version("PTYXIS_VERSION") >= 48 ||
+           version("KONSOLE_VERSION") >= 260400       # 26.04
+        :osc94
+    else
+        nothing
+    end
+end
+
+# The sequence reporting `state` to the terminal. During the run that is `:working`, or
+# `:failing` once a test did not pass, with `completed` out of `total` tests done. At the end
+# it is `:clear`, which removes the progress bar.
+function progress_bar_sequence(state::Symbol, completed::Integer = 0, total::Integer = 0)
+    percent = total > 0 ? clamp(100 * completed ÷ total, 0, 100) : 0
+    report = state === :working ? "1;$percent" : state === :failing ? "2;$percent" : "0"
+    return "\033]9;4;$report\a"
+end
+
 # Truncate `line` to at most `max_width` characters, appending "..." when truncated.
 function truncate_line(line::AbstractString, max_width::Int)
     if length(line) > max_width

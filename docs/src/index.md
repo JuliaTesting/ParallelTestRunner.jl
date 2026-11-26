@@ -140,6 +140,9 @@ The test runner provides real-time output showing:
 - Memory allocation
 - RSS (Resident Set Size) memory usage, shown in yellow once it exceeds the RSS threshold
 
+Terminals that can draw a progress bar of their own, e.g. in the tab or in the taskbar, also get the overall progress of the run, which turns red once a test fails.
+This is enabled for Windows Terminal, ConEmu, Ghostty, WezTerm, iTerm2, Ptyxis, Konsole and herdr; set the `PTR_TERM_PROGRESS` environment variable to `osc94` to enable it in another terminal that supports it, or to `none` to disable it.
+
 ### Graceful Interruption
 
 Press `Ctrl+C` to interrupt the test run. The framework will:

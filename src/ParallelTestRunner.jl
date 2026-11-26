@@ -420,6 +420,8 @@ function _runtests(mod::Module, args::ParsedArgs;
     end
 
     io_ctx = test_IOContext(RecordType, stdout, stderr, print_lock, name_align, !isnothing(args.verbose), max_worker_rss)
+    # progress bar drawn by the terminal itself, e.g. in its tab or in the taskbar
+    progress_protocol = io_ctx.stdout isa Base.TTY ? progress_bar_protocol() : nothing
     print_header(RecordType, io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
@@ -501,6 +503,10 @@ function _runtests(mod::Module, args::ParsedArgs;
             println(io_ctx.stdout, line1)
             println(io_ctx.stdout, line2)
             print(io_ctx.stdout, line3)
+            if progress_protocol !== nothing
+                state = any(nonpass, results_snapshot) ? :failing : :working
+                print(io_ctx.stdout, progress_bar_sequence(state, completed, total))
+            end
             flush(io_ctx.stdout)
             status_lines_visible[] = 3
         end
@@ -588,8 +594,10 @@ function _runtests(mod::Module, args::ParsedArgs;
                     end
                 end
 
-                # After a while, display a status line
-                if !done[] && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 20))
+                # After a while, display a status line. It is refreshed even when nothing
+                # happens, often enough for the terminals that drop a progress bar they have
+                # not heard about in a while
+                if !done[] && time() - t0 >= 5 && (got_message || (time() - last_status_update[] >= 12))
                     update_status()
                     last_status_update[] = time()
                 end
@@ -608,6 +616,11 @@ function _runtests(mod::Module, args::ParsedArgs;
         finally
             n_running = @lock running_tests length(running_tests[])
             n_results = @lock results length(results[])
+            if progress_protocol !== nothing
+                # there is nowhere to leave an outcome, so the progress bar is removed
+                print(io_ctx.stdout, progress_bar_sequence(:clear))
+                flush(io_ctx.stdout)
+            end
             if n_running == 0 && n_results >= length(tests)
                 # XXX: only erase the status if we completed successfully.
                 #      in other cases we'll have printed "caught interrupt"
