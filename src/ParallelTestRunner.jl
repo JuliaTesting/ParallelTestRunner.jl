@@ -423,6 +423,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     print_header(RecordType, io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
+    nonpass(r) = r.result isa Exception || anynonpass(r.result[])
 
     function clear_status()
         if status_lines_visible[] > 0
@@ -820,8 +821,7 @@ function _runtests(mod::Module, args::ParsedArgs;
                 # got here normally; there is no point retrying a run being torn down.
                 done[] && break
 
-                retry_tests = [r.test for r in results.value
-                                    if r.result isa Exception || anynonpass(r.result[])]
+                retry_tests = [r.test for r in results.value if nonpass(r)]
                 isempty(retry_tests) && break
 
                 # the last attempt of a test is the one that gets reported, so print it red
