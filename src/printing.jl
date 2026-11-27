@@ -213,6 +213,26 @@ function progress_bar_protocols(env = ENV)
     end
 end
 
+# What each of the checks of `progress_bar_protocols` gives, to tell why they were chosen:
+# OSC 7501 is sent unless something disables it, and OSC 9;4 along with it when one of the
+# `osc94_` checks holds and the terminal is not Rex
+function progress_bar_features(env = ENV)
+    version(name) = something(tryparse(Int, first(eachsplit(get(env, name, ""), '.'))), 0)
+    term = get(env, "TERM_PROGRAM", "")
+    return (;
+        forced = get(env, "PTR_TERM_PROGRESS", ""),
+        disabled_by_dumb_term = get(env, "TERM", "") == "dumb",
+        rex_without_osc94 = term == "rex",
+        osc94_windows_terminal = haskey(env, "WT_SESSION"),
+        osc94_conemu = get(env, "ConEmuANSI", "") == "ON",
+        osc94_term_program = term in ("ghostty", "WezTerm", "herdr"),
+        osc94_ghostty_term = get(env, "TERM", "") == "xterm-ghostty",
+        osc94_term_features = occursin(r"P(?![a-z])", get(env, "TERM_FEATURES", "")),
+        osc94_ptyxis = version("PTYXIS_VERSION") >= 48,
+        osc94_konsole = version("KONSOLE_VERSION") >= 260400,
+    )
+end
+
 # The sequence reporting `state` to a terminal that speaks `protocol`. During the run that is
 # `:working`, or `:failing` once a test did not pass, with `completed` out of `total` tests
 # done, which `msg` describes. At the end it is `:done`, `:error`, or `:clear` when

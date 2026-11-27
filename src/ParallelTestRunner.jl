@@ -423,6 +423,7 @@ function _runtests(mod::Module, args::ParsedArgs;
     io_ctx = test_IOContext(RecordType, stdout, stderr, print_lock, name_align, !isnothing(args.verbose), max_worker_rss)
     # progress bar drawn by the terminal itself, e.g. in its tab or in the taskbar
     progress_protocols = io_ctx.stdout isa Base.TTY ? progress_bar_protocols() : Symbol[]
+    @info "Progress is reported to the terminal with: $(isempty(progress_protocols) ? "nothing" : join(progress_protocols, ", "))" tty = io_ctx.stdout isa Base.TTY progress_bar_features()...
     print_header(RecordType, io_ctx, testgroupheader, workerheader)
 
     status_lines_visible = Ref(0)
